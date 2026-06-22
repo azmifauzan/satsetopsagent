@@ -9,8 +9,7 @@ import (
 
 func TestSshHarden(t *testing.T) {
 	runner := exec.NewFakeRunner()
-	runner.Outputs["cat /root/.ssh/authorized_keys"] = "ssh-rsa AAAAB3NzaC1yc2E..."
-	runner.Outputs["bash -c echo -e 'PermitRootLogin no\\nPasswordAuthentication no\\n' > /etc/ssh/sshd_config.d/99-satsetops-harden.conf"] = ""
+	runner.Outputs["bash -c echo -e 'PermitEmptyPasswords no\\nMaxAuthTries 4\\nX11Forwarding no\\n' > /etc/ssh/sshd_config.d/99-satsetops-harden.conf"] = ""
 	runner.Outputs["systemctl reload ssh"] = ""
 
 	_, err := sshHarden(nil, runner)
@@ -23,15 +22,16 @@ func TestSshHarden(t *testing.T) {
 	}
 }
 
-func TestSshHardenNoKeyGuard(t *testing.T) {
+func TestSshHardenDoesNotTouchLoginMethod(t *testing.T) {
 	runner := exec.NewFakeRunner()
-	runner.Outputs["cat /root/.ssh/authorized_keys"] = "no keys here"
 
-	_, err := sshHarden(nil, runner)
-	if err == nil {
-		t.Fatal("expected error from guard when no key found")
+	if _, err := sshHarden(nil, runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "guard failed") {
-		t.Errorf("expected guard failed error, got: %v", err)
+
+	for _, cmd := range runner.Commands {
+		if strings.Contains(cmd, "PermitRootLogin") || strings.Contains(cmd, "PasswordAuthentication no") {
+			t.Fatalf("ssh_harden must never touch root login or password auth, got command: %s", cmd)
+		}
 	}
 }

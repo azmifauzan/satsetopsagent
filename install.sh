@@ -50,9 +50,6 @@ ExecStart=/usr/local/bin/satsetopsagent
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=true
-ProtectHome=true
-ProtectSystem=strict
-ReadWritePaths=/etc/satsetops
 PrivateTmp=true
 
 [Install]

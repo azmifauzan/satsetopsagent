@@ -7,8 +7,10 @@ import (
 )
 
 func sysupdateHarden(payload map[string]any, runner exec.Runner) (string, error) {
-	// Install unattended-upgrades
-	_, err := runner.Run("apt-get", "install", "-y", "unattended-upgrades")
+	// Install unattended-upgrades. DEBIAN_FRONTEND=noninteractive is required:
+	// apt-get otherwise tries a debconf dialog and fails outright under
+	// systemd, which gives the process no controlling TTY.
+	_, err := runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades")
 	if err != nil {
 		return "", fmt.Errorf("failed to install unattended-upgrades: %w", err)
 	}

@@ -32,20 +32,3 @@ func dockerHarden(payload map[string]any, runner exec.Runner) (string, error) {
 
 	return "docker daemon hardened", nil
 }
-
-// These are placeholders for other phase 2 commands
-func deployApp(payload map[string]any, runner exec.Runner) (string, error) {
-	return "app deployed", nil
-}
-
-func restartContainer(payload map[string]any, runner exec.Runner) (string, error) {
-	return "container restarted", nil
-}
-
-func stopContainer(payload map[string]any, runner exec.Runner) (string, error) {
-	return "container stopped", nil
-}
-
-func collectLogs(payload map[string]any, runner exec.Runner) (string, error) {
-	return "logs collected", nil
-}

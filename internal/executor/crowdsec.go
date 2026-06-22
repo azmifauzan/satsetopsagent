@@ -14,8 +14,10 @@ func installCrowdsec(payload map[string]any, runner exec.Runner) (string, error)
 		return "", fmt.Errorf("failed to add crowdsec repo: %w", err)
 	}
 
-	// Install engine
-	_, err = runner.Run("apt-get", "install", "-y", "crowdsec")
+	// Install engine. DEBIAN_FRONTEND=noninteractive is required: apt-get
+	// otherwise tries a debconf dialog and fails outright under systemd,
+	// which gives the process no controlling TTY.
+	_, err = runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec")
 	if err != nil {
 		return "", fmt.Errorf("failed to install crowdsec engine: %w", err)
 	}
@@ -47,7 +49,7 @@ CPUQuota=20%
 	}
 
 	// Install bouncer
-	_, err = runner.Run("apt-get", "install", "-y", "crowdsec-firewall-bouncer-iptables")
+	_, err = runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables")
 	if err != nil {
 		return "", fmt.Errorf("failed to install crowdsec bouncer: %w", err)
 	}

@@ -2,6 +2,7 @@ package exec_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/satsetops/agent/internal/exec"
@@ -27,5 +28,17 @@ func TestFakeRunner(t *testing.T) {
 
 	if !runner.HasCommand("echo hello") {
 		t.Fatal("expected 'echo hello' to be recorded")
+	}
+}
+
+func TestRealRunnerSurfacesStderr(t *testing.T) {
+	runner := &exec.RealRunner{}
+
+	_, err := runner.Run("sh", "-c", "echo 'boom' >&2; exit 1")
+	if err == nil {
+		t.Fatal("expected error from non-zero exit")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected error to include stderr text, got: %v", err)
 	}
 }
