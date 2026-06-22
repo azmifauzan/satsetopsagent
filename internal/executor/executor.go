@@ -5,49 +5,91 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
+
+	"github.com/satsetops/agent/internal/exec"
 )
 
 // Dispatch only executes action types compiled into the agent. There is no
 // fallback to a shell or arbitrary command execution.
-func Dispatch(commandType string, payload map[string]any) (string, error) {
+func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (string, error) {
 	switch commandType {
 	case "scan_vps":
-		return scanVPS()
+		return scanVPS(runner)
 	case "harden_firewall":
-		return hardenFirewall(payload)
+		return hardenFirewall(payload, runner)
 	case "ssh_harden":
-		return sshHarden(payload)
+		return sshHarden(payload, runner)
 	case "install_crowdsec":
-		return installCrowdsec(payload)
+		return installCrowdsec(payload, runner)
+	case "sysupdate":
+		return sysupdateHarden(payload, runner)
+	case "docker_harden":
+		return dockerHarden(payload, runner)
 	case "set_firewall_rule":
-		return setFirewallRule(payload)
+		return setFirewallRule(payload, runner)
 	case "deploy_app":
-		return deployApp(payload)
+		return deployApp(payload, runner)
 	case "restart_container":
-		return restartContainer(payload)
+		return restartContainer(payload, runner)
 	case "stop_container":
-		return stopContainer(payload)
+		return stopContainer(payload, runner)
 	case "attach_domain_ssl":
-		return attachDomainSsl(payload)
+		return attachDomainSsl(payload, runner)
 	case "collect_logs":
-		return collectLogs(payload)
+		return collectLogs(payload, runner)
 	case "backup_now":
-		return backupNow(payload)
+		return backupNow(payload, runner)
 	default:
 		return "", fmt.Errorf("unsupported command type: %s", commandType)
 	}
 }
 
-func scanVPS() (string, error) {
+func scanVPS(runner exec.Runner) (string, error) {
 	_, dockerSocketError := os.Stat("/var/run/docker.sock")
+	
+	clean := true
+	var findings []string
+
+	// Check if port 80 or 443 are in use
+	out, err := runner.Run("ss", "-tuln")
+	if err == nil {
+		if strings.Contains(out, ":80 ") {
+			clean = false
+			findings = append(findings, "Port 80 is already in use")
+		}
+		if strings.Contains(out, ":443 ") {
+			clean = false
+			findings = append(findings, "Port 443 is already in use")
+		}
+	}
+
+	// Check for common panels or services
+	out, err = runner.Run("systemctl", "list-units", "--type=service", "--state=running")
+	if err == nil {
+		suspicious := []string{"apache2", "nginx", "mysql", "cpanel"}
+		for _, s := range suspicious {
+			if strings.Contains(out, s+".service") {
+				clean = false
+				findings = append(findings, fmt.Sprintf("Service %s is running", s))
+			}
+		}
+	}
+
+	if findings == nil {
+		findings = []string{}
+	}
+
 	report := struct {
-		Docker       bool   `json:"docker"`
-		Clean        bool   `json:"clean"`
-		OS           string `json:"os"`
-		Architecture string `json:"architecture"`
+		Docker       bool     `json:"docker"`
+		Clean        bool     `json:"clean"`
+		Findings     []string `json:"findings"`
+		OS           string   `json:"os"`
+		Architecture string   `json:"architecture"`
 	}{
 		Docker:       dockerSocketError == nil,
-		Clean:        true,
+		Clean:        clean,
+		Findings:     findings,
 		OS:           runtime.GOOS,
 		Architecture: runtime.GOARCH,
 	}

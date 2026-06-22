@@ -9,6 +9,7 @@ import (
 
 	"github.com/satsetops/agent/internal/api"
 	"github.com/satsetops/agent/internal/executor"
+	"github.com/satsetops/agent/internal/exec"
 )
 
 type Client interface {
@@ -24,7 +25,7 @@ func RunOnce(client Client) error {
 	}
 
 	for _, command := range commands {
-		output, executeError := executor.Dispatch(command.Type, command.Payload)
+		output, executeError := executor.Dispatch(command.Type, command.Payload, &exec.RealRunner{})
 		success := executeError == nil
 		exitCode := 0
 		if executeError != nil {

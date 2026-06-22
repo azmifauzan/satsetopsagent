@@ -3,16 +3,20 @@ package executor
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/satsetops/agent/internal/exec"
 )
 
 func TestUnknownTypeReturnsError(t *testing.T) {
-	if _, err := Dispatch("totally_unknown", nil); err == nil {
+	runner := exec.NewFakeRunner()
+	if _, err := Dispatch("totally_unknown", nil, runner); err == nil {
 		t.Fatal("expected error for unknown command type")
 	}
 }
 
 func TestScanVPSReturnsJSONReport(t *testing.T) {
-	output, err := Dispatch("scan_vps", nil)
+	runner := exec.NewFakeRunner()
+	output, err := Dispatch("scan_vps", nil, runner)
 	if err != nil {
 		t.Fatalf("scan_vps: %v", err)
 	}
