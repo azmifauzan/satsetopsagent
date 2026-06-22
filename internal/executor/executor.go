@@ -28,6 +28,16 @@ func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (s
 		return dockerHarden(payload, runner)
 	case "set_firewall_rule":
 		return setFirewallRule(payload, runner)
+	case "deploy_app":
+		return deployApp(payload, runner)
+	case "restart_container":
+		return restartContainer(payload, runner)
+	case "stop_container":
+		return stopContainer(payload, runner)
+	case "attach_domain_ssl":
+		return attachDomainSSL(payload, runner)
+	case "collect_logs":
+		return collectLogs(payload, runner)
 	default:
 		return "", fmt.Errorf("unsupported command type: %s", commandType)
 	}

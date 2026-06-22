@@ -20,8 +20,7 @@ func TestUnknownTypeReturnsError(t *testing.T) {
 func TestPhase3PlusTypesRejected(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	for _, commandType := range []string{
-		"deploy_app", "restart_container", "stop_container",
-		"attach_domain_ssl", "collect_logs", "backup_now",
+		"backup_now",
 	} {
 		if _, err := Dispatch(commandType, nil, runner); err == nil {
 			t.Errorf("expected %q to be rejected as unimplemented", commandType)
