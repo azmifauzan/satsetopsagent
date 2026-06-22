@@ -9,10 +9,30 @@ import (
 
 // Dispatch only executes action types compiled into the agent. There is no
 // fallback to a shell or arbitrary command execution.
-func Dispatch(commandType string, _ map[string]any) (string, error) {
+func Dispatch(commandType string, payload map[string]any) (string, error) {
 	switch commandType {
 	case "scan_vps":
 		return scanVPS()
+	case "harden_firewall":
+		return hardenFirewall(payload)
+	case "ssh_harden":
+		return sshHarden(payload)
+	case "install_crowdsec":
+		return installCrowdsec(payload)
+	case "set_firewall_rule":
+		return setFirewallRule(payload)
+	case "deploy_app":
+		return deployApp(payload)
+	case "restart_container":
+		return restartContainer(payload)
+	case "stop_container":
+		return stopContainer(payload)
+	case "attach_domain_ssl":
+		return attachDomainSsl(payload)
+	case "collect_logs":
+		return collectLogs(payload)
+	case "backup_now":
+		return backupNow(payload)
 	default:
 		return "", fmt.Errorf("unsupported command type: %s", commandType)
 	}
