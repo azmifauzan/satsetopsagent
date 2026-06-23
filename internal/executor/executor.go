@@ -38,6 +38,10 @@ func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (s
 		return attachDomainSSL(payload, runner)
 	case "collect_logs":
 		return collectLogs(payload, runner)
+	case "backup_now":
+		return backupNow(payload, runner)
+	case "restore":
+		return restoreBackup(payload, runner)
 	default:
 		return "", fmt.Errorf("unsupported command type: %s", commandType)
 	}
