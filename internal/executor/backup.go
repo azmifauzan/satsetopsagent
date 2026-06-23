@@ -3,19 +3,51 @@ package executor
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/satsetops/agent/internal/exec"
 )
 
+// resourceNameRegex constrains container/volume/database names used as
+// docker/mysqldump/pg_dump arguments. Stricter than deploy.go's nameRegex —
+// must start with an alnum so a value like "--privileged" or "-v" can't be
+// mistaken for a flag by docker's argv parser, and "/" / ":" are rejected so
+// a volume_name can't smuggle a bind mount of an arbitrary host path.
+var resourceNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,254}$`)
+
+func validateResourceName(field, value string) error {
+	if !resourceNameRegex.MatchString(value) {
+		return fmt.Errorf("invalid %s format", field)
+	}
+
+	return nil
+}
+
+func validateHTTPURL(field, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("invalid %s: must be an http(s) URL", field)
+	}
+
+	return nil
+}
+
 func backupNow(payload map[string]any, runner exec.Runner) (string, error) {
 	appName, err := requireString(payload, "application_name")
 	if err != nil {
 		return "", err
 	}
+	if err := validateResourceName("application_name", appName); err != nil {
+		return "", err
+	}
 	volumeName, err := requireString(payload, "volume_name")
 	if err != nil {
+		return "", err
+	}
+	if err := validateResourceName("volume_name", volumeName); err != nil {
 		return "", err
 	}
 	storagePath, err := requireString(payload, "storage_path")
@@ -24,6 +56,9 @@ func backupNow(payload map[string]any, runner exec.Runner) (string, error) {
 	}
 	uploadURL, err := requireString(payload, "upload_url")
 	if err != nil {
+		return "", err
+	}
+	if err := validateHTTPURL("upload_url", uploadURL); err != nil {
 		return "", err
 	}
 
@@ -57,7 +92,7 @@ func backupNow(payload map[string]any, runner exec.Runner) (string, error) {
 		return "", fmt.Errorf("archive backup: %w", err)
 	}
 
-	if _, err := runner.Run("curl", "-X", "PUT", uploadURL, "-T", archivePath); err != nil {
+	if _, err := runner.Run("curl", "-X", "PUT", "-T", archivePath, "--", uploadURL); err != nil {
 		return "", fmt.Errorf("upload backup archive: %w", err)
 	}
 
@@ -86,12 +121,21 @@ func restoreBackup(payload map[string]any, runner exec.Runner) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := validateResourceName("application_name", appName); err != nil {
+		return "", err
+	}
 	volumeName, err := requireString(payload, "volume_name")
 	if err != nil {
 		return "", err
 	}
+	if err := validateResourceName("volume_name", volumeName); err != nil {
+		return "", err
+	}
 	downloadURL, err := requireString(payload, "download_url")
 	if err != nil {
+		return "", err
+	}
+	if err := validateHTTPURL("download_url", downloadURL); err != nil {
 		return "", err
 	}
 
@@ -103,7 +147,7 @@ func restoreBackup(payload map[string]any, runner exec.Runner) (string, error) {
 		return "", fmt.Errorf("create restore temp dir: %w", err)
 	}
 
-	if _, err := runner.Run("curl", "-L", downloadURL, "-o", archivePath); err != nil {
+	if _, err := runner.Run("curl", "-L", "-o", archivePath, "--", downloadURL); err != nil {
 		return "", fmt.Errorf("download backup archive: %w", err)
 	}
 
@@ -111,7 +155,7 @@ func restoreBackup(payload map[string]any, runner exec.Runner) (string, error) {
 		return "", fmt.Errorf("extract backup archive: %w", err)
 	}
 
-	if _, err := runner.Run("docker", "stop", appName); err != nil {
+	if _, err := runner.Run("docker", "stop", "--", appName); err != nil {
 		return "", fmt.Errorf("stop app container %s: %w", appName, err)
 	}
 
@@ -132,7 +176,7 @@ func restoreBackup(payload map[string]any, runner exec.Runner) (string, error) {
 		}
 	}
 
-	if _, err := runner.Run("docker", "start", appName); err != nil {
+	if _, err := runner.Run("docker", "start", "--", appName); err != nil {
 		return "", fmt.Errorf("start app container %s: %w", appName, err)
 	}
 
@@ -148,8 +192,14 @@ func dumpDatabase(tempDir string, database map[string]any, runner exec.Runner) e
 	if err != nil {
 		return err
 	}
+	if err := validateResourceName("database.container", container); err != nil {
+		return err
+	}
 	dbName, err := requireMapString(database, "database")
 	if err != nil {
+		return err
+	}
+	if err := validateResourceName("database.database", dbName); err != nil {
 		return err
 	}
 	username, err := requireMapString(database, "username")
@@ -192,8 +242,14 @@ func restoreDatabase(tempDir string, database map[string]any, runner exec.Runner
 	if err != nil {
 		return err
 	}
+	if err := validateResourceName("database.container", container); err != nil {
+		return err
+	}
 	dbName, err := requireMapString(database, "database")
 	if err != nil {
+		return err
+	}
+	if err := validateResourceName("database.database", dbName); err != nil {
 		return err
 	}
 	username, err := requireMapString(database, "username")

@@ -35,7 +35,7 @@ func TestBackupNowArchivesVolumeAndDatabaseThenUploads(t *testing.T) {
 	if !runner.HasCommandWithPrefix("sh -c docker exec 'blog-db' mysqldump -u'root' -p'secret' 'blog' > '/tmp/satsetops-backups/blog-12/database.sql'") {
 		t.Fatalf("expected mysql dump command, got %#v", runner.Commands)
 	}
-	if !runner.HasCommand("curl -X PUT https://upload.example.test/demo -T /tmp/satsetops-backups/blog-12/archive.tgz") {
+	if !runner.HasCommand("curl -X PUT -T /tmp/satsetops-backups/blog-12/archive.tgz -- https://upload.example.test/demo") {
 		t.Fatalf("expected upload command, got %#v", runner.Commands)
 	}
 	for _, cmd := range runner.Commands {
@@ -69,11 +69,11 @@ func TestRestoreBackupStopsRestoresAndStartsInOrder(t *testing.T) {
 	}
 
 	expected := []string{
-		"curl -L https://download.example.test/demo -o /tmp/satsetops-restore/blog-7/archive.tgz",
-		"docker stop blog",
+		"curl -L -o /tmp/satsetops-restore/blog-7/archive.tgz -- https://download.example.test/demo",
+		"docker stop -- blog",
 		"docker run --rm -v blog_data:/target -v /tmp/satsetops-restore/blog-7:/backup busybox sh -c rm -rf /target/* /target/.[!.]* /target/..?* 2>/dev/null; tar -xzf /backup/volume.tar.gz -C /target",
 		"sh -c docker exec -i -e 'PGPASSWORD=secret' 'blog-db' psql -U 'postgres' 'blog' < '/tmp/satsetops-restore/blog-7/database.sql'",
-		"docker start blog",
+		"docker start -- blog",
 	}
 
 	lastIndex := -1
@@ -112,5 +112,64 @@ func TestDumpDatabaseEscapesShellMetacharactersInCredentials(t *testing.T) {
 	cmd := runner.Commands[len(runner.Commands)-1]
 	if !strings.HasPrefix(cmd, "sh -c docker exec 'db' mysqldump -u'root' -p'o'\\''; rm -rf / #' 'blog'") {
 		t.Fatalf("password not safely quoted: %s", cmd)
+	}
+}
+
+func TestBackupNowRejectsFlagLikeVolumeName(t *testing.T) {
+	runner := exec.NewFakeRunner()
+
+	_, err := backupNow(map[string]any{
+		"backup_run_id":    1,
+		"application_name": "blog",
+		"volume_name":      "/etc:/etc",
+		"storage_path":     "backups/1/1/demo.tgz",
+		"upload_url":       "https://upload.example.test/demo",
+	}, runner)
+	if err == nil {
+		t.Fatal("expected error for volume_name containing ':' (bind-mount escape)")
+	}
+}
+
+func TestBackupNowRejectsNonHTTPUploadURL(t *testing.T) {
+	runner := exec.NewFakeRunner()
+
+	_, err := backupNow(map[string]any{
+		"backup_run_id":    1,
+		"application_name": "blog",
+		"volume_name":      "blog_data",
+		"storage_path":     "backups/1/1/demo.tgz",
+		"upload_url":       "file:///etc/passwd",
+	}, runner)
+	if err == nil {
+		t.Fatal("expected error for non-http(s) upload_url")
+	}
+}
+
+func TestRestoreBackupRejectsFlagLikeApplicationName(t *testing.T) {
+	runner := exec.NewFakeRunner()
+
+	_, err := restoreBackup(map[string]any{
+		"backup_run_id":    1,
+		"application_name": "--privileged",
+		"volume_name":      "blog_data",
+		"download_url":     "https://download.example.test/demo",
+	}, runner)
+	if err == nil {
+		t.Fatal("expected error for application_name starting with '-' (argv flag smuggling)")
+	}
+}
+
+func TestDumpDatabaseRejectsFlagLikeContainerName(t *testing.T) {
+	runner := exec.NewFakeRunner()
+
+	err := dumpDatabase("/tmp/x", map[string]any{
+		"driver":    "mysql",
+		"container": "--privileged",
+		"database":  "blog",
+		"username":  "root",
+		"password":  "secret",
+	}, runner)
+	if err == nil {
+		t.Fatal("expected error for container name starting with '-'")
 	}
 }
