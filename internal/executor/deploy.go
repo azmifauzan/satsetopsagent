@@ -10,8 +10,10 @@ import (
 )
 
 var (
-	nameRegex  = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
-	imageRegex = regexp.MustCompile(`^[a-zA-Z0-9_./:@-]+$`)
+	nameRegex         = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+	imageRegex        = regexp.MustCompile(`^[a-zA-Z0-9_./:@-]+$`)
+	registryHostRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.:-]*$`)
+	registryUserRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._@-]*$`)
 )
 
 // registryHostOf extracts the registry host from an image reference, the
@@ -48,8 +50,17 @@ func loginRegistry(image string, payload map[string]any, runner exec.Runner) err
 	if host == "" {
 		return fmt.Errorf("registry credentials provided but image %q has no registry host", image)
 	}
+	// Both become positional/flag-value args to `docker login` below — a
+	// value starting with "-" could be parsed as a flag by docker's argv
+	// parser (e.g. a host of "--config=/tmp/evil" or similar).
+	if !registryHostRegex.MatchString(host) {
+		return fmt.Errorf("invalid registry host format: %q", host)
+	}
+	if !registryUserRegex.MatchString(username) {
+		return fmt.Errorf("invalid registry username format")
+	}
 
-	if _, err := runner.RunWithStdin("docker", password, "login", host, "-u", username, "--password-stdin"); err != nil {
+	if _, err := runner.RunWithStdin("docker", password, "login", "-u", username, "--password-stdin", "--", host); err != nil {
 		return fmt.Errorf("failed to login to registry %s: %w", host, err)
 	}
 

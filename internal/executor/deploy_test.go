@@ -42,7 +42,7 @@ func TestDeployApp(t *testing.T) {
 
 func TestDeployAppLogsIntoRegistryWhenCredentialsProvided(t *testing.T) {
 	runner := exec.NewFakeRunner()
-	runner.Outputs["docker login registry.example.com -u alice --password-stdin"] = "Login Succeeded"
+	runner.Outputs["docker login -u fixture-deploy-user --password-stdin -- registry.example.com"] = "Login Succeeded"
 	runner.Outputs["docker pull registry.example.com/test-image:latest"] = ""
 	runner.Outputs["docker rm -f test-app"] = ""
 	runner.Outputs["docker run -d --name test-app -p 127.0.0.1:8080:8080 --restart unless-stopped registry.example.com/test-image:latest"] = "container_id"
@@ -51,15 +51,15 @@ func TestDeployAppLogsIntoRegistryWhenCredentialsProvided(t *testing.T) {
 		"image":             "registry.example.com/test-image:latest",
 		"name":              "test-app",
 		"port":              8080,
-		"registry_username": "alice",
-		"registry_password": "s3cret",
+		"registry_username": "fixture-deploy-user",
+		"registry_password": "not-a-real-credential-fixture-value",
 	}
 
 	if _, err := deployApp(payload, runner); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !runner.HasCommand("docker login registry.example.com -u alice --password-stdin") {
+	if !runner.HasCommand("docker login -u fixture-deploy-user --password-stdin -- registry.example.com") {
 		t.Errorf("missing docker login command, got: %v", runner.Commands)
 	}
 }
@@ -92,8 +92,8 @@ func TestDeployAppRejectsCredentialsForUnqualifiedImage(t *testing.T) {
 		"image":             "nginx:latest",
 		"name":              "test-app",
 		"port":              8080,
-		"registry_username": "alice",
-		"registry_password": "s3cret",
+		"registry_username": "fixture-deploy-user",
+		"registry_password": "not-a-real-credential-fixture-value",
 	}
 
 	if _, err := deployApp(payload, runner); err == nil {
