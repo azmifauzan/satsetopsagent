@@ -14,6 +14,48 @@ var (
 	imageRegex = regexp.MustCompile(`^[a-zA-Z0-9_./:@-]+$`)
 )
 
+// registryHostOf extracts the registry host from an image reference, the
+// same way the Docker CLI itself decides whether a ref's first path
+// segment is a registry host (contains "." or ":", or is "localhost")
+// versus a Docker Hub repository (e.g. "nginx" or "library/nginx").
+func registryHostOf(image string) string {
+	parts := strings.SplitN(image, "/", 2)
+	if len(parts) < 2 {
+		// No "/" at all means it's a bare Docker Hub repo (e.g.
+		// "nginx:latest") — that colon is the tag separator, not a
+		// registry port, since a registry host is never valid on its own
+		// without a path after it.
+		return ""
+	}
+	first := parts[0]
+	if first == "localhost" || strings.ContainsAny(first, ".:") {
+		return first
+	}
+	return ""
+}
+
+// loginRegistry runs `docker login` against the image's registry host if
+// the payload carries credentials for it. Password goes via stdin, never
+// as a CLI arg, so it doesn't show up in `ps`.
+func loginRegistry(image string, payload map[string]any, runner exec.Runner) error {
+	username, _ := payload["registry_username"].(string)
+	password, _ := payload["registry_password"].(string)
+	if username == "" || password == "" {
+		return nil
+	}
+
+	host := registryHostOf(image)
+	if host == "" {
+		return fmt.Errorf("registry credentials provided but image %q has no registry host", image)
+	}
+
+	if _, err := runner.RunWithStdin("docker", password, "login", host, "-u", username, "--password-stdin"); err != nil {
+		return fmt.Errorf("failed to login to registry %s: %w", host, err)
+	}
+
+	return nil
+}
+
 func deployApp(payload map[string]any, runner exec.Runner) (string, error) {
 	image, ok := payload["image"].(string)
 	if !ok || image == "" {
@@ -46,6 +88,10 @@ func deployApp(payload map[string]any, runner exec.Runner) (string, error) {
 	portVal, err := strconv.Atoi(portStr)
 	if err != nil || portVal < 1 || portVal > 65535 {
 		return "", fmt.Errorf("invalid port value: %s", portStr)
+	}
+
+	if err := loginRegistry(image, payload, runner); err != nil {
+		return "", err
 	}
 
 	// Pull the image first

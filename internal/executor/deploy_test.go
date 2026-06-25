@@ -40,6 +40,67 @@ func TestDeployApp(t *testing.T) {
 	}
 }
 
+func TestDeployAppLogsIntoRegistryWhenCredentialsProvided(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["docker login registry.example.com -u alice --password-stdin"] = "Login Succeeded"
+	runner.Outputs["docker pull registry.example.com/test-image:latest"] = ""
+	runner.Outputs["docker rm -f test-app"] = ""
+	runner.Outputs["docker run -d --name test-app -p 127.0.0.1:8080:8080 --restart unless-stopped registry.example.com/test-image:latest"] = "container_id"
+
+	payload := map[string]any{
+		"image":             "registry.example.com/test-image:latest",
+		"name":              "test-app",
+		"port":              8080,
+		"registry_username": "alice",
+		"registry_password": "s3cret",
+	}
+
+	if _, err := deployApp(payload, runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !runner.HasCommand("docker login registry.example.com -u alice --password-stdin") {
+		t.Errorf("missing docker login command, got: %v", runner.Commands)
+	}
+}
+
+func TestDeployAppSkipsLoginWithoutCredentials(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["docker pull test-image:latest"] = ""
+	runner.Outputs["docker rm -f test-app"] = ""
+	runner.Outputs["docker run -d --name test-app -p 127.0.0.1:8080:8080 --restart unless-stopped test-image:latest"] = "container_id"
+
+	payload := map[string]any{
+		"image": "test-image:latest",
+		"name":  "test-app",
+		"port":  8080,
+	}
+
+	if _, err := deployApp(payload, runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if runner.HasCommandWithPrefix("docker login") {
+		t.Errorf("did not expect a docker login call, got: %v", runner.Commands)
+	}
+}
+
+func TestDeployAppRejectsCredentialsForUnqualifiedImage(t *testing.T) {
+	runner := exec.NewFakeRunner()
+
+	payload := map[string]any{
+		"image":             "nginx:latest",
+		"name":              "test-app",
+		"port":              8080,
+		"registry_username": "alice",
+		"registry_password": "s3cret",
+	}
+
+	if _, err := deployApp(payload, runner); err == nil {
+		t.Fatal("expected error for credentials against an unqualified (Docker Hub) image, got nil")
+	}
+}
+
 func TestDeployAppPullError(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Errors["docker pull test-image:latest"] = errors.New("pull failed")

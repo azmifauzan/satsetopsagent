@@ -20,6 +20,14 @@ func NewFakeRunner() *FakeRunner {
 }
 
 func (f *FakeRunner) Run(name string, args ...string) (string, error) {
+	return f.run(name, args...)
+}
+
+func (f *FakeRunner) RunWithStdin(name string, stdin string, args ...string) (string, error) {
+	return f.run(name, args...)
+}
+
+func (f *FakeRunner) run(name string, args ...string) (string, error) {
 	cmdStr := name
 	if len(args) > 0 {
 		cmdStr += " " + strings.Join(args, " ")
