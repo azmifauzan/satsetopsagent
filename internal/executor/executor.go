@@ -26,6 +26,8 @@ func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (s
 		return sysupdateHarden(payload, runner)
 	case "docker_harden":
 		return dockerHarden(payload, runner)
+	case "setup_nginx_proxy":
+		return setupNginxProxy(payload, runner)
 	case "set_firewall_rule":
 		return setFirewallRule(payload, runner)
 	case "deploy_app":
@@ -53,21 +55,24 @@ func scanVPS(runner exec.Runner) (string, error) {
 	clean := true
 	var findings []string
 
-	// Check if port 80 or 443 are in use
-	out, err := runner.Run("ss", "-tuln")
-	if err == nil {
-		if strings.Contains(out, ":80 ") {
-			clean = false
-			findings = append(findings, "Port 80 is already in use")
-		}
-		if strings.Contains(out, ":443 ") {
-			clean = false
-			findings = append(findings, "Port 443 is already in use")
+	// Check if port 80 or 443 are in use by something other than our own nginx-certbot proxy.
+	nginxRunning, _ := runner.Run("docker", "inspect", "-f", "{{.State.Running}}", "nginx-certbot")
+	nginxAlreadySetup := strings.TrimSpace(nginxRunning) == "true"
+	if !nginxAlreadySetup {
+		if out, err := runner.Run("ss", "-tuln"); err == nil {
+			if strings.Contains(out, ":80 ") {
+				clean = false
+				findings = append(findings, "Port 80 is already in use")
+			}
+			if strings.Contains(out, ":443 ") {
+				clean = false
+				findings = append(findings, "Port 443 is already in use")
+			}
 		}
 	}
 
 	// Check for common panels or services
-	out, err = runner.Run("systemctl", "list-units", "--type=service", "--state=running")
+	out, err := runner.Run("systemctl", "list-units", "--type=service", "--state=running")
 	if err == nil {
 		suspicious := []string{"apache2", "nginx", "mysql", "cpanel"}
 		for _, s := range suspicious {

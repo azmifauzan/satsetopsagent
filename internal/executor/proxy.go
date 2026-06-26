@@ -11,6 +11,26 @@ import (
 
 var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}$`)
 
+// setupNginxProxy deploys and hardens the jonasal/nginx-certbot reverse proxy
+// container. Called once during the hardening sequence (after docker_harden),
+// not lazily on first attach_domain_ssl. Idempotent: no-op if already running.
+func setupNginxProxy(payload map[string]any, runner exec.Runner) (string, error) {
+	email, _ := payload["email"].(string)
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", fmt.Errorf("missing 'email' in payload (required for Certbot)")
+	}
+
+	if err := ensureNginxCertbotRunning(email, runner); err != nil {
+		return "", err
+	}
+
+	return "nginx-certbot proxy deployed and hardened", nil
+}
+
+// attachDomainSSL writes a hardened vhost config for the domain and reloads
+// nginx-certbot (which triggers certbot for the cert). Assumes setupNginxProxy
+// has already been run during hardening.
 func attachDomainSSL(payload map[string]any, runner exec.Runner) (string, error) {
 	domain, ok := payload["domain"].(string)
 	if !ok || domain == "" {
@@ -38,23 +58,59 @@ func attachDomainSSL(payload map[string]any, runner exec.Runner) (string, error)
 		return "", fmt.Errorf("invalid port value: %s", portStr)
 	}
 
-	email, _ := payload["email"].(string)
-	email = strings.TrimSpace(email)
-	if email == "" {
-		email = "admin@" + domain
+	if err := writeVhostConfig(domain, portStr, runner); err != nil {
+		return "", err
 	}
 
-	// 1. Ensure directories exist on host
-	_, err = runner.Run("mkdir", "-p", "/etc/nginx/user_conf.d")
-	if err != nil {
-		return "", fmt.Errorf("failed to create nginx user_conf.d directory: %w", err)
-	}
-	_, err = runner.Run("mkdir", "-p", "/etc/letsencrypt")
-	if err != nil {
-		return "", fmt.Errorf("failed to create letsencrypt directory: %w", err)
+	if _, err := runner.Run("docker", "kill", "--signal=HUP", "nginx-certbot"); err != nil {
+		return "", fmt.Errorf("failed to reload nginx-certbot: %w", err)
 	}
 
-	// 2. Write Nginx config
+	return fmt.Sprintf("domain %s attached and SSL requested", domain), nil
+}
+
+// ensureNginxCertbotRunning starts the container if not already running.
+// Idempotent — safe to call on re-hardening.
+func ensureNginxCertbotRunning(email string, runner exec.Runner) error {
+	if _, err := runner.Run("mkdir", "-p", "/etc/nginx/user_conf.d"); err != nil {
+		return fmt.Errorf("create nginx user_conf.d: %w", err)
+	}
+	if _, err := runner.Run("mkdir", "-p", "/etc/letsencrypt"); err != nil {
+		return fmt.Errorf("create letsencrypt dir: %w", err)
+	}
+
+	running, _ := runner.Run("docker", "inspect", "-f", "{{.State.Running}}", "nginx-certbot")
+	switch strings.TrimSpace(running) {
+	case "true":
+		return nil
+	case "false":
+		if _, err := runner.Run("docker", "start", "nginx-certbot"); err != nil {
+			return fmt.Errorf("start nginx-certbot: %w", err)
+		}
+		return nil
+	}
+
+	// Container does not exist — deploy it.
+	_, err := runner.Run("docker", "run", "-d",
+		"--name", "nginx-certbot",
+		"--network", "host",
+		"--restart", "unless-stopped",
+		"-v", "/etc/nginx/user_conf.d:/etc/nginx/user_conf.d",
+		"-v", "/etc/letsencrypt:/etc/letsencrypt",
+		"-e", "CERTBOT_EMAIL="+email,
+		"jonasal/nginx-certbot:latest",
+	)
+	if err != nil {
+		return fmt.Errorf("deploy nginx-certbot: %w", err)
+	}
+	return nil
+}
+
+func writeVhostConfig(domain, portStr string, runner exec.Runner) error {
+	if _, err := runner.Run("mkdir", "-p", "/etc/nginx/user_conf.d"); err != nil {
+		return fmt.Errorf("create nginx user_conf.d: %w", err)
+	}
+
 	zoneName := strings.ReplaceAll(domain, ".", "_") + "_limit"
 	nginxConfig := fmt.Sprintf(`limit_req_zone $binary_remote_addr zone=%s:10m rate=10r/s;
 
@@ -95,41 +151,6 @@ server {
 `, zoneName, domain, domain, domain, domain, zoneName, portStr)
 
 	configFile := fmt.Sprintf("/etc/nginx/user_conf.d/%s.conf", domain)
-	// Write configuration file
-	_, err = runner.Run("bash", "-c", fmt.Sprintf("echo -e '%s' > %s", strings.ReplaceAll(nginxConfig, "\n", "\\n"), configFile))
-	if err != nil {
-		return "", fmt.Errorf("failed to write nginx config file: %w", err)
-	}
-
-	// 3. Ensure nginx-certbot container is deployed and running
-	runningStatus, err := runner.Run("docker", "inspect", "-f", "{{.State.Running}}", "nginx-certbot")
-	if err != nil {
-		// Container doesn't exist, deploy it
-		_, err = runner.Run("docker", "run", "-d",
-			"--name", "nginx-certbot",
-			"--network", "host",
-			"--restart", "unless-stopped",
-			"-v", "/etc/nginx/user_conf.d:/etc/nginx/user_conf.d",
-			"-v", "/etc/letsencrypt:/etc/letsencrypt",
-			"-e", "CERTBOT_EMAIL="+email,
-			"jonasal/nginx-certbot:latest",
-		)
-		if err != nil {
-			return "", fmt.Errorf("failed to deploy nginx-certbot container: %w", err)
-		}
-	} else if strings.TrimSpace(runningStatus) != "true" {
-		// Container exists but not running, start it
-		_, err = runner.Run("docker", "start", "nginx-certbot")
-		if err != nil {
-			return "", fmt.Errorf("failed to start nginx-certbot container: %w", err)
-		}
-	}
-
-	// 4. Reload Nginx configuration to apply changes and trigger certbot
-	_, err = runner.Run("docker", "kill", "--signal=HUP", "nginx-certbot")
-	if err != nil {
-		return "", fmt.Errorf("failed to reload nginx-certbot config: %w", err)
-	}
-
-	return fmt.Sprintf("domain %s attached and SSL requested", domain), nil
+	_, err := runner.RunWithStdin("bash", nginxConfig, "-c", fmt.Sprintf("cat > %s", configFile))
+	return err
 }
