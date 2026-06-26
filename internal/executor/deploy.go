@@ -114,8 +114,10 @@ func deployApp(payload map[string]any, runner exec.Runner) (string, error) {
 	// Remove container if it already exists
 	_, _ = runner.Run("docker", "rm", "-f", name)
 
-	// Build run args
-	args := []string{"run", "-d", "--name", name, "-p", fmt.Sprintf("127.0.0.1:%s:%s", portStr, portStr), "--restart", "unless-stopped"}
+	// App containers run on the satsetops-proxy Docker network so nginx-certbot
+	// can reach them by container name (proxy_pass http://name:port). No host
+	// port binding needed — all traffic enters via nginx-certbot on 80/443.
+	args := []string{"run", "-d", "--name", name, "--network", "satsetops-proxy", "--restart", "unless-stopped"}
 
 	// Extract env variables
 	if envs, ok := payload["env"].(map[string]any); ok {

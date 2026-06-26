@@ -11,9 +11,11 @@ import (
 
 var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}$`)
 
+const proxyNetwork = "satsetops-proxy"
+
 // setupNginxProxy deploys and hardens the jonasal/nginx-certbot reverse proxy
-// container. Called once during the hardening sequence (after docker_harden),
-// not lazily on first attach_domain_ssl. Idempotent: no-op if already running.
+// container on the satsetops-proxy Docker network. Called once during hardening
+// (after docker_harden), not lazily on first attach_domain_ssl. Idempotent.
 func setupNginxProxy(payload map[string]any, runner exec.Runner) (string, error) {
 	email, _ := payload["email"].(string)
 	email = strings.TrimSpace(email)
@@ -21,6 +23,9 @@ func setupNginxProxy(payload map[string]any, runner exec.Runner) (string, error)
 		return "", fmt.Errorf("missing 'email' in payload (required for Certbot)")
 	}
 
+	if err := ensureProxyNetwork(runner); err != nil {
+		return "", err
+	}
 	if err := ensureNginxCertbotRunning(email, runner); err != nil {
 		return "", err
 	}
@@ -29,8 +34,8 @@ func setupNginxProxy(payload map[string]any, runner exec.Runner) (string, error)
 }
 
 // attachDomainSSL writes a hardened vhost config for the domain and reloads
-// nginx-certbot (which triggers certbot for the cert). Assumes setupNginxProxy
-// has already been run during hardening.
+// nginx-certbot. Traffic flows: nginx-certbot → container_name:port inside
+// the satsetops-proxy Docker network. Assumes setupNginxProxy already ran.
 func attachDomainSSL(payload map[string]any, runner exec.Runner) (string, error) {
 	domain, ok := payload["domain"].(string)
 	if !ok || domain == "" {
@@ -39,6 +44,12 @@ func attachDomainSSL(payload map[string]any, runner exec.Runner) (string, error)
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if !domainRegex.MatchString(domain) {
 		return "", fmt.Errorf("invalid domain format (must be FQDN)")
+	}
+
+	containerName, _ := payload["container_name"].(string)
+	containerName = strings.TrimSpace(containerName)
+	if containerName == "" {
+		return "", fmt.Errorf("missing 'container_name' in payload")
 	}
 
 	var portStr string
@@ -58,7 +69,7 @@ func attachDomainSSL(payload map[string]any, runner exec.Runner) (string, error)
 		return "", fmt.Errorf("invalid port value: %s", portStr)
 	}
 
-	if err := writeVhostConfig(domain, portStr, runner); err != nil {
+	if err := writeVhostConfig(domain, containerName, portStr, runner); err != nil {
 		return "", err
 	}
 
@@ -67,6 +78,19 @@ func attachDomainSSL(payload map[string]any, runner exec.Runner) (string, error)
 	}
 
 	return fmt.Sprintf("domain %s attached and SSL requested", domain), nil
+}
+
+// ensureProxyNetwork creates the satsetops-proxy Docker bridge network if it
+// doesn't already exist. Idempotent.
+func ensureProxyNetwork(runner exec.Runner) error {
+	out, _ := runner.Run("docker", "network", "inspect", proxyNetwork)
+	if strings.Contains(out, proxyNetwork) {
+		return nil
+	}
+	if _, err := runner.Run("docker", "network", "create", proxyNetwork); err != nil {
+		return fmt.Errorf("create %s network: %w", proxyNetwork, err)
+	}
+	return nil
 }
 
 // ensureNginxCertbotRunning starts the container if not already running.
@@ -91,15 +115,17 @@ func ensureNginxCertbotRunning(email string, runner exec.Runner) error {
 	}
 
 	// Container does not exist — deploy it.
-	// Use port publishing instead of --network host: host networking fails
-	// when Docker user namespaces are enabled (common on hardened VPSes).
-	// --add-host allows the vhost config to reach services on the host via
-	// host.docker.internal instead of 127.0.0.1.
+	// --userns=host: certbot inside the container runs as root; without this,
+	// Docker user-namespace remapping prevents writes to the /etc/letsencrypt
+	// bind-mount (owned by real root on the host).
+	// --network: joins the satsetops-proxy bridge so it can reach app containers
+	// by name via proxy_pass.
 	_, err := runner.Run("docker", "run", "-d",
 		"--name", "nginx-certbot",
 		"-p", "80:80",
 		"-p", "443:443",
-		"--add-host=host.docker.internal:host-gateway",
+		"--userns=host",
+		"--network", proxyNetwork,
 		"--restart", "unless-stopped",
 		"-v", "/etc/nginx/user_conf.d:/etc/nginx/user_conf.d",
 		"-v", "/etc/letsencrypt:/etc/letsencrypt",
@@ -112,7 +138,7 @@ func ensureNginxCertbotRunning(email string, runner exec.Runner) error {
 	return nil
 }
 
-func writeVhostConfig(domain, portStr string, runner exec.Runner) error {
+func writeVhostConfig(domain, containerName, portStr string, runner exec.Runner) error {
 	if _, err := runner.Run("mkdir", "-p", "/etc/nginx/user_conf.d"); err != nil {
 		return fmt.Errorf("create nginx user_conf.d: %w", err)
 	}
@@ -147,14 +173,14 @@ server {
     limit_req zone=%s burst=20 nodelay;
 
     location / {
-        proxy_pass http://host.docker.internal:%s;
+        proxy_pass http://%s:%s;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-`, zoneName, domain, domain, domain, domain, zoneName, portStr)
+`, zoneName, domain, domain, domain, domain, zoneName, containerName, portStr)
 
 	configFile := fmt.Sprintf("/etc/nginx/user_conf.d/%s.conf", domain)
 	_, err := runner.RunWithStdin("bash", nginxConfig, "-c", fmt.Sprintf("cat > %s", configFile))

@@ -11,7 +11,7 @@ func TestDeployApp(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs["docker pull test-image:latest"] = ""
 	runner.Outputs["docker rm -f test-app"] = ""
-	runner.Outputs["docker run -d --name test-app -p 127.0.0.1:8080:8080 --restart unless-stopped -e FOO=BAR test-image:latest"] = "container_id_12345"
+	runner.Outputs["docker run -d --name test-app --network satsetops-proxy --restart unless-stopped -e FOO=BAR test-image:latest"] = "container_id_12345"
 
 	payload := map[string]any{
 		"image": "test-image:latest",
@@ -45,7 +45,7 @@ func TestDeployAppLogsIntoRegistryWhenCredentialsProvided(t *testing.T) {
 	runner.Outputs["docker login -u fixture-deploy-user --password-stdin -- registry.example.com"] = "Login Succeeded"
 	runner.Outputs["docker pull registry.example.com/test-image:latest"] = ""
 	runner.Outputs["docker rm -f test-app"] = ""
-	runner.Outputs["docker run -d --name test-app -p 127.0.0.1:8080:8080 --restart unless-stopped registry.example.com/test-image:latest"] = "container_id"
+	runner.Outputs["docker run -d --name test-app --network satsetops-proxy --restart unless-stopped registry.example.com/test-image:latest"] = "container_id"
 
 	payload := map[string]any{
 		"image":             "registry.example.com/test-image:latest",
@@ -68,7 +68,7 @@ func TestDeployAppSkipsLoginWithoutCredentials(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs["docker pull test-image:latest"] = ""
 	runner.Outputs["docker rm -f test-app"] = ""
-	runner.Outputs["docker run -d --name test-app -p 127.0.0.1:8080:8080 --restart unless-stopped test-image:latest"] = "container_id"
+	runner.Outputs["docker run -d --name test-app --network satsetops-proxy --restart unless-stopped test-image:latest"] = "container_id"
 
 	payload := map[string]any{
 		"image": "test-image:latest",
