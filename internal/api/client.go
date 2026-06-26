@@ -83,6 +83,58 @@ func (c *Client) PostMetrics(metrics Metrics) error {
 	return nil
 }
 
+type TrafficSummary struct {
+	TotalRequests  uint32      `json:"total_requests"`
+	Requests4xx    uint32      `json:"requests_4xx"`
+	Requests5xx    uint32      `json:"requests_5xx"`
+	TopPaths       []PathCount `json:"top_paths"`
+	TopIPs         []IPCount   `json:"top_ips"`
+	BandwidthBytes uint64      `json:"bandwidth_bytes"`
+}
+
+type PathCount struct {
+	Path  string `json:"path"`
+	Count uint32 `json:"count"`
+}
+
+type IPCount struct {
+	IP    string `json:"ip"`
+	Count uint32 `json:"count"`
+}
+
+type SecurityEvent struct {
+	TotalAlerts     uint32           `json:"total_alerts"`
+	ActiveBans      uint32           `json:"active_bans"`
+	AttacksTimeline []AttackIncident `json:"attacks_timeline"`
+	AttackTypes     []AttackType     `json:"attack_types"`
+}
+
+type AttackIncident struct {
+	Time   string `json:"time"`
+	Source string `json:"source"`
+	Reason string `json:"reason"`
+	IP     string `json:"ip"`
+}
+
+type AttackType struct {
+	Type  string `json:"type"`
+	Count uint32 `json:"count"`
+}
+
+func (c *Client) PostTraffic(traffic TrafficSummary) error {
+	if err := c.doJSON(http.MethodPost, "/api/agent/traffic", traffic, nil); err != nil {
+		return fmt.Errorf("post traffic: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) PostSecurity(security SecurityEvent) error {
+	if err := c.doJSON(http.MethodPost, "/api/agent/security", security, nil); err != nil {
+		return fmt.Errorf("post security: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) doJSON(method, path string, input, output any) error {
 	var body io.Reader
 	if input != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/satsetops/agent/internal/api"
 	"github.com/satsetops/agent/internal/auth"
 	"github.com/satsetops/agent/internal/config"
+	"github.com/satsetops/agent/internal/exec"
 	"github.com/satsetops/agent/internal/poller"
 	"github.com/satsetops/agent/internal/reporter"
 	"github.com/satsetops/agent/internal/version"
@@ -64,6 +65,12 @@ func run() error {
 	go func() {
 		errorsChannel <- reportMetrics(ctx, client, cfg.MetricsInterval)
 	}()
+	go func() {
+		errorsChannel <- reportTraffic(ctx, client, cfg.TrafficInterval)
+	}()
+	go func() {
+		errorsChannel <- reportSecurity(ctx, client, cfg.SecurityInterval)
+	}()
 
 	err = <-errorsChannel
 	cancel()
@@ -89,6 +96,50 @@ func reportMetrics(ctx context.Context, client *api.Client, interval time.Durati
 			return api.ErrUnauthorized
 		} else if err != nil {
 			log.Printf("metric report failed: %v", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func reportTraffic(ctx context.Context, client *api.Client, interval time.Duration) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		traffic, err := reporter.CollectTraffic(&exec.RealRunner{})
+		if err != nil {
+			log.Printf("traffic collection failed: %v", err)
+		} else if err := client.PostTraffic(traffic); errors.Is(err, api.ErrUnauthorized) {
+			return api.ErrUnauthorized
+		} else if err != nil {
+			log.Printf("traffic report failed: %v", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func reportSecurity(ctx context.Context, client *api.Client, interval time.Duration) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		security, err := reporter.CollectSecurity(&exec.RealRunner{})
+		if err != nil {
+			log.Printf("security collection failed: %v", err)
+		} else if err := client.PostSecurity(security); errors.Is(err, api.ErrUnauthorized) {
+			return api.ErrUnauthorized
+		} else if err != nil {
+			log.Printf("security report failed: %v", err)
 		}
 
 		select {

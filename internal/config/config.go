@@ -16,13 +16,15 @@ const (
 )
 
 type Config struct {
-	ServerURL       string
-	OneTimeToken    string
-	TokenPath       string
-	EnvironmentPath string
-	EncKey          []byte
-	PollInterval    time.Duration
-	MetricsInterval time.Duration
+	ServerURL        string
+	OneTimeToken     string
+	TokenPath        string
+	EnvironmentPath  string
+	EncKey           []byte
+	PollInterval     time.Duration
+	MetricsInterval  time.Duration
+	TrafficInterval  time.Duration
+	SecurityInterval time.Duration
 }
 
 func Load() (Config, error) {
@@ -31,6 +33,14 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	metricsInterval, err := durationFromEnv("SATSETOPS_METRICS_INTERVAL", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	trafficInterval, err := durationFromEnv("SATSETOPS_TRAFFIC_INTERVAL", 60*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	securityInterval, err := durationFromEnv("SATSETOPS_SECURITY_INTERVAL", 60*time.Second)
 	if err != nil {
 		return Config{}, err
 	}
@@ -45,13 +55,15 @@ func Load() (Config, error) {
 	key := sha256.Sum256([]byte(strings.TrimSpace(string(machineID))))
 
 	return Config{
-		ServerURL:       strings.TrimRight(valueOrDefault("SATSETOPS_URL", defaultServerURL), "/"),
-		OneTimeToken:    os.Getenv("SATSETOPS_TOKEN"),
-		TokenPath:       valueOrDefault("SATSETOPS_TOKEN_PATH", defaultTokenPath),
-		EnvironmentPath: valueOrDefault("SATSETOPS_ENV_PATH", defaultEnvironmentPath),
-		EncKey:          key[:],
-		PollInterval:    pollInterval,
-		MetricsInterval: metricsInterval,
+		ServerURL:        strings.TrimRight(valueOrDefault("SATSETOPS_URL", defaultServerURL), "/"),
+		OneTimeToken:     os.Getenv("SATSETOPS_TOKEN"),
+		TokenPath:        valueOrDefault("SATSETOPS_TOKEN_PATH", defaultTokenPath),
+		EnvironmentPath:  valueOrDefault("SATSETOPS_ENV_PATH", defaultEnvironmentPath),
+		EncKey:           key[:],
+		PollInterval:     pollInterval,
+		MetricsInterval:  metricsInterval,
+		TrafficInterval:  trafficInterval,
+		SecurityInterval: securityInterval,
 	}, nil
 }
 
