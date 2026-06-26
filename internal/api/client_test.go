@@ -23,6 +23,24 @@ func TestRegisterReturnsPermanentToken(t *testing.T) {
 	}
 }
 
+func TestPostMetricsParsesIntervalHint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/agent/metrics" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"metrics_enabled":false,"next_interval_seconds":3600}`))
+	}))
+	defer server.Close()
+
+	response, err := New(server.URL, "perm-123").PostMetrics(Metrics{})
+	if err != nil {
+		t.Fatalf("PostMetrics: %v", err)
+	}
+	if response.MetricsEnabled || response.NextIntervalSeconds != 3600 {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
 func TestPollUsesBearerAndReturnsCommands(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer perm-123" {

@@ -26,6 +26,12 @@ type Metrics struct {
 	UptimeSeconds uint64  `json:"uptime_seconds"`
 }
 
+type MetricsResponse struct {
+	OK                  bool `json:"ok"`
+	MetricsEnabled      bool `json:"metrics_enabled"`
+	NextIntervalSeconds int  `json:"next_interval_seconds"`
+}
+
 type Client struct {
 	baseURL string
 	token   string
@@ -76,11 +82,12 @@ func (c *Client) PostResult(id int, success bool, output string, exitCode int) e
 	return nil
 }
 
-func (c *Client) PostMetrics(metrics Metrics) error {
-	if err := c.doJSON(http.MethodPost, "/api/agent/metrics", metrics, nil); err != nil {
-		return fmt.Errorf("post metrics: %w", err)
+func (c *Client) PostMetrics(metrics Metrics) (MetricsResponse, error) {
+	var response MetricsResponse
+	if err := c.doJSON(http.MethodPost, "/api/agent/metrics", metrics, &response); err != nil {
+		return MetricsResponse{}, fmt.Errorf("post metrics: %w", err)
 	}
-	return nil
+	return response, nil
 }
 
 type TrafficSummary struct {

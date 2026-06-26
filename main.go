@@ -85,25 +85,39 @@ func run() error {
 }
 
 func reportMetrics(ctx context.Context, client *api.Client, interval time.Duration) error {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
 	for {
 		metrics, err := reporter.Collect()
 		if err != nil {
 			log.Printf("metric collection failed: %v", err)
-		} else if err := client.PostMetrics(metrics); errors.Is(err, api.ErrUnauthorized) {
+		} else if response, err := client.PostMetrics(metrics); errors.Is(err, api.ErrUnauthorized) {
 			return api.ErrUnauthorized
 		} else if err != nil {
 			log.Printf("metric report failed: %v", err)
+		} else if response.NextIntervalSeconds > 0 {
+			interval = clampMetricsInterval(time.Duration(response.NextIntervalSeconds) * time.Second)
+			if !response.MetricsEnabled {
+				log.Printf("metrics ingest paused by server for %s", interval)
+			}
 		}
 
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
+}
+
+func clampMetricsInterval(interval time.Duration) time.Duration {
+	if interval < 10*time.Second {
+		return 10 * time.Second
+	}
+	if interval > time.Hour {
+		return time.Hour
+	}
+	return interval
 }
 
 func reportTraffic(ctx context.Context, client *api.Client, interval time.Duration) error {

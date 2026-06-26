@@ -8,14 +8,13 @@ import (
 	"time"
 
 	"github.com/satsetops/agent/internal/api"
-	"github.com/satsetops/agent/internal/executor"
 	"github.com/satsetops/agent/internal/exec"
+	"github.com/satsetops/agent/internal/executor"
 )
 
 type Client interface {
 	Poll() ([]api.Command, error)
 	PostResult(id int, success bool, output string, exitCode int) error
-	PostMetrics(metrics api.Metrics) error
 }
 
 func RunOnce(client Client) error {

@@ -30,6 +30,10 @@ func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (s
 		return setupNginxProxy(payload, runner)
 	case "set_firewall_rule":
 		return setFirewallRule(payload, runner)
+	case "security_audit":
+		return securityAudit(runner)
+	case "reboot_server":
+		return rebootServer(runner)
 	case "deploy_app":
 		return deployApp(payload, runner)
 	case "restart_container":
@@ -51,7 +55,7 @@ func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (s
 
 func scanVPS(runner exec.Runner) (string, error) {
 	_, dockerSocketError := os.Stat("/var/run/docker.sock")
-	
+
 	clean := true
 	var findings []string
 

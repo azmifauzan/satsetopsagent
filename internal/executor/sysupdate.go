@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/satsetops/agent/internal/exec"
@@ -51,5 +52,21 @@ APT::Periodic::Unattended-Upgrade "1";
 		// some OS might not have it as a service but a cron
 	}
 
-	return "unattended-upgrades configured for security", nil
+	_, rebootErr := runner.Run("test", "-f", "/var/run/reboot-required")
+
+	output := struct {
+		SecurityUpdatesConfigured bool `json:"security_updates_configured"`
+		Changed                   bool `json:"changed"`
+		RebootRequired            bool `json:"reboot_required"`
+	}{
+		SecurityUpdatesConfigured: true,
+		Changed:                   true,
+		RebootRequired:            rebootErr == nil,
+	}
+
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("encode sysupdate result: %w", err)
+	}
+	return string(encoded), nil
 }
