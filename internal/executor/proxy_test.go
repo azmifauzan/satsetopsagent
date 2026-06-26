@@ -99,6 +99,14 @@ func TestAttachDomainSSLInvalidDomain(t *testing.T) {
 	}
 }
 
+func TestAttachDomainSSLInvalidContainerName(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	payload := map[string]any{"domain": "example.com", "container_name": "app; rm -rf /", "port": 80}
+	if _, err := attachDomainSSL(payload, runner); err == nil {
+		t.Fatal("expected error for invalid container_name")
+	}
+}
+
 func TestAttachDomainSSLMissingContainerName(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	payload := map[string]any{"domain": "example.com", "port": 80}

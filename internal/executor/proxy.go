@@ -10,6 +10,7 @@ import (
 )
 
 var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}$`)
+var containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 const proxyNetwork = "satsetops-proxy"
 
@@ -50,6 +51,9 @@ func attachDomainSSL(payload map[string]any, runner exec.Runner) (string, error)
 	containerName = strings.TrimSpace(containerName)
 	if containerName == "" {
 		return "", fmt.Errorf("missing 'container_name' in payload")
+	}
+	if !containerNameRegex.MatchString(containerName) {
+		return "", fmt.Errorf("invalid container_name (must match Docker name format)")
 	}
 
 	var portStr string
