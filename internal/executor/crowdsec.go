@@ -23,7 +23,7 @@ func installCrowdsec(payload map[string]any, runner exec.Runner) (string, error)
 	}
 
 	// Install limited collections
-	collections := []string{"crowdsecurity/sshd", "crowdsecurity/http-cve"}
+	collections := []string{"crowdsecurity/sshd", "crowdsecurity/nginx", "crowdsecurity/http-cve"}
 	for _, coll := range collections {
 		_, err = runner.Run("cscli", "collections", "install", coll)
 		if err != nil && !strings.Contains(err.Error(), "already installed") {

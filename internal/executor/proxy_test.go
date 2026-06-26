@@ -10,6 +10,10 @@ func TestSetupNginxProxy(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs["mkdir -p /etc/nginx/user_conf.d"] = ""
 	runner.Outputs["mkdir -p /etc/letsencrypt"] = ""
+	runner.Outputs["mkdir -p /var/log/satsetops/nginx"] = ""
+	runner.Outputs["mkdir -p /etc/crowdsec/acquis.d"] = ""
+	runner.Outputs["bash -c"] = ""
+	runner.Outputs["systemctl reload-or-restart crowdsec"] = ""
 	// Network doesn't exist yet:
 	runner.Outputs["docker network inspect satsetops-proxy"] = ""
 	runner.Outputs["docker network create satsetops-proxy"] = ""
@@ -23,7 +27,7 @@ func TestSetupNginxProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res != "nginx-certbot proxy deployed and hardened" {
+	if res != "nginx-certbot proxy deployed, hardened, and connected to crowdsec" {
 		t.Errorf("unexpected result: %s", res)
 	}
 	if !runner.HasCommandWithPrefix("docker network create") {
@@ -32,12 +36,20 @@ func TestSetupNginxProxy(t *testing.T) {
 	if !runner.HasCommandWithPrefix("docker run") {
 		t.Errorf("expected docker run to deploy nginx-certbot")
 	}
+	if !runner.HasCommand("systemctl reload-or-restart crowdsec") {
+		t.Errorf("expected crowdsec reload")
+	}
 }
 
 func TestSetupNginxProxyIdempotent(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs["mkdir -p /etc/nginx/user_conf.d"] = ""
 	runner.Outputs["mkdir -p /etc/letsencrypt"] = ""
+	runner.Outputs["mkdir -p /var/log/satsetops/nginx"] = ""
+	runner.Outputs["mkdir -p /etc/crowdsec/acquis.d"] = ""
+	runner.Outputs["bash -c"] = ""
+	runner.Outputs["docker kill --signal=HUP nginx-certbot"] = ""
+	runner.Outputs["systemctl reload-or-restart crowdsec"] = ""
 	// Network already exists:
 	runner.Outputs["docker network inspect satsetops-proxy"] = `[{"Name":"satsetops-proxy"}]`
 	// Container already running:
