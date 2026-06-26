@@ -91,9 +91,15 @@ func ensureNginxCertbotRunning(email string, runner exec.Runner) error {
 	}
 
 	// Container does not exist — deploy it.
+	// Use port publishing instead of --network host: host networking fails
+	// when Docker user namespaces are enabled (common on hardened VPSes).
+	// --add-host allows the vhost config to reach services on the host via
+	// host.docker.internal instead of 127.0.0.1.
 	_, err := runner.Run("docker", "run", "-d",
 		"--name", "nginx-certbot",
-		"--network", "host",
+		"-p", "80:80",
+		"-p", "443:443",
+		"--add-host=host.docker.internal:host-gateway",
 		"--restart", "unless-stopped",
 		"-v", "/etc/nginx/user_conf.d:/etc/nginx/user_conf.d",
 		"-v", "/etc/letsencrypt:/etc/letsencrypt",
@@ -141,7 +147,7 @@ server {
     limit_req zone=%s burst=20 nodelay;
 
     location / {
-        proxy_pass http://127.0.0.1:%s;
+        proxy_pass http://host.docker.internal:%s;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
