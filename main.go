@@ -63,7 +63,7 @@ func run() error {
 		errorsChannel <- poller.Run(ctx, client, cfg.PollInterval)
 	}()
 	go func() {
-		errorsChannel <- reportMetrics(ctx, client, cfg.MetricsInterval)
+		errorsChannel <- reportMetrics(ctx, client, clampMetricsInterval(cfg.MetricsInterval))
 	}()
 	go func() {
 		errorsChannel <- reportTraffic(ctx, client, cfg.TrafficInterval)
