@@ -9,7 +9,7 @@ import (
 
 func TestBackupNowArchivesVolumeAndDatabaseThenUploads(t *testing.T) {
 	runner := exec.NewFakeRunner()
-	runner.Outputs["stat -c %s /tmp/satsetops-backups/blog-12/archive.tgz"] = "2048"
+	runner.Outputs["stat -c %s /tmp/satsetops-backups/blog-12.tgz"] = "2048"
 
 	output, err := backupNow(map[string]any{
 		"backup_run_id":    12,
@@ -29,13 +29,13 @@ func TestBackupNowArchivesVolumeAndDatabaseThenUploads(t *testing.T) {
 		t.Fatalf("backup_now: %v", err)
 	}
 
-	if !runner.HasCommandWithPrefix("docker run --rm -v blog_data:/source:ro") {
+	if !runner.HasCommandWithPrefix("sh -c docker run --rm -v 'blog_data':/source:ro busybox tar -czf - -C /source . >") {
 		t.Fatalf("expected volume backup command, got %#v", runner.Commands)
 	}
 	if !runner.HasCommandWithPrefix("sh -c docker exec 'blog-db' mysqldump -u'root' -p'secret' 'blog' > '/tmp/satsetops-backups/blog-12/database.sql'") {
 		t.Fatalf("expected mysql dump command, got %#v", runner.Commands)
 	}
-	if !runner.HasCommand("curl -X PUT -T /tmp/satsetops-backups/blog-12/archive.tgz -- https://upload.example.test/demo") {
+	if !runner.HasCommand("curl -X PUT -T /tmp/satsetops-backups/blog-12.tgz -- https://upload.example.test/demo") {
 		t.Fatalf("expected upload command, got %#v", runner.Commands)
 	}
 	for _, cmd := range runner.Commands {
@@ -71,7 +71,7 @@ func TestRestoreBackupStopsRestoresAndStartsInOrder(t *testing.T) {
 	expected := []string{
 		"curl -L -o /tmp/satsetops-restore/blog-7/archive.tgz -- https://download.example.test/demo",
 		"docker stop -- blog",
-		"docker run --rm -v blog_data:/target -v /tmp/satsetops-restore/blog-7:/backup busybox sh -c rm -rf /target/* /target/.[!.]* /target/..?* 2>/dev/null; tar -xzf /backup/volume.tar.gz -C /target",
+		"sh -c docker run --rm -i -v 'blog_data':/target busybox sh -c 'rm -rf /target/* /target/.[!.]* /target/..?* 2>/dev/null && tar -xzf - -C /target' < '/tmp/satsetops-restore/blog-7/volume.tar.gz'",
 		"sh -c docker exec -i -e 'PGPASSWORD=secret' 'blog-db' psql -U 'postgres' 'blog' < '/tmp/satsetops-restore/blog-7/database.sql'",
 		"docker start -- blog",
 	}

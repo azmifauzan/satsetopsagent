@@ -64,19 +64,20 @@ func backupNow(payload map[string]any, runner exec.Runner) (string, error) {
 
 	runID := stringOrDefault(payload["backup_run_id"], "run")
 	tempDir := fmt.Sprintf("/tmp/satsetops-backups/%s-%s", appName, runID)
-	archivePath := fmt.Sprintf("%s/archive.tgz", tempDir)
+	archivePath := fmt.Sprintf("/tmp/satsetops-backups/%s-%s.tgz", appName, runID)
 
 	if _, err := runner.Run("mkdir", "-p", tempDir); err != nil {
 		return "", fmt.Errorf("create backup temp dir: %w", err)
 	}
 
-	if _, err := runner.Run(
-		"docker", "run", "--rm",
-		"-v", volumeName+":/source:ro",
-		"-v", tempDir+":/backup",
-		"busybox",
-		"tar", "-czf", "/backup/volume.tar.gz", "-C", "/source", ".",
-	); err != nil {
+	// Stream tar output from the container directly to a host file to avoid
+	// Docker overlay filesystem flush timing issues when writing via a mount.
+	volumeTar := tempDir + "/volume.tar.gz"
+	cmd := fmt.Sprintf(
+		"docker run --rm -v %s:/source:ro busybox tar -czf - -C /source . > %s",
+		shellQuote(volumeName), shellQuote(volumeTar),
+	)
+	if _, err := runner.Run("sh", "-c", cmd); err != nil {
 		return "", fmt.Errorf("backup volume %s: %w", volumeName, err)
 	}
 
@@ -88,7 +89,11 @@ func backupNow(payload map[string]any, runner exec.Runner) (string, error) {
 		dbIncluded = true
 	}
 
-	if _, err := runner.Run("tar", "-czf", archivePath, "-C", tempDir, "."); err != nil {
+	tarArgs := []string{"-czf", archivePath, "-C", tempDir, "volume.tar.gz"}
+	if dbIncluded {
+		tarArgs = append(tarArgs, "database.sql")
+	}
+	if _, err := runner.Run("tar", tarArgs...); err != nil {
 		return "", fmt.Errorf("archive backup: %w", err)
 	}
 
@@ -159,14 +164,14 @@ func restoreBackup(payload map[string]any, runner exec.Runner) (string, error) {
 		return "", fmt.Errorf("stop app container %s: %w", appName, err)
 	}
 
-	restoreCmd := fmt.Sprintf("rm -rf /target/* /target/.[!.]* /target/..?* 2>/dev/null; tar -xzf /backup/volume.tar.gz -C /target")
-	if _, err := runner.Run(
-		"docker", "run", "--rm",
-		"-v", volumeName+":/target",
-		"-v", tempDir+":/backup",
-		"busybox",
-		"sh", "-c", restoreCmd,
-	); err != nil {
+	// Stream volume.tar.gz from private tmp to container stdin so PrivateTmp=true
+	// in the systemd unit doesn't prevent Docker from seeing the extracted files.
+	restoreCmd := fmt.Sprintf(
+		"docker run --rm -i -v %s:/target busybox sh -c"+
+			" 'rm -rf /target/* /target/.[!.]* /target/..?* 2>/dev/null && tar -xzf - -C /target' < %s",
+		shellQuote(volumeName), shellQuote(tempDir+"/volume.tar.gz"),
+	)
+	if _, err := runner.Run("sh", "-c", restoreCmd); err != nil {
 		return "", fmt.Errorf("restore volume %s: %w", volumeName, err)
 	}
 
