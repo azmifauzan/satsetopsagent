@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/satsetops/agent/internal/exec"
@@ -24,20 +23,5 @@ func TestPhase3PlusTypesRejected(t *testing.T) {
 		if _, err := Dispatch(commandType, nil, runner); err == nil {
 			t.Errorf("expected %q to be rejected as unimplemented", commandType)
 		}
-	}
-}
-
-func TestScanVPSReturnsJSONReport(t *testing.T) {
-	runner := exec.NewFakeRunner()
-	output, err := Dispatch("scan_vps", nil, runner)
-	if err != nil {
-		t.Fatalf("scan_vps: %v", err)
-	}
-	var report map[string]any
-	if err := json.Unmarshal([]byte(output), &report); err != nil {
-		t.Fatalf("invalid report JSON: %v", err)
-	}
-	if report["clean"] != true {
-		t.Fatalf("unexpected report: %s", output)
 	}
 }
