@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/satsetops/agent/internal/version"
 )
 
 var ErrUnauthorized = errors.New("unauthorized")
@@ -63,7 +65,8 @@ func (c *Client) Register(oneTime string) (string, error) {
 
 func (c *Client) Poll() ([]Command, error) {
 	var commands []Command
-	if err := c.doJSON(http.MethodGet, "/api/agent/commands", nil, &commands); err != nil {
+	headers := map[string]string{"X-Satsetops-Agent-Version": version.String()}
+	if err := c.doJSON(http.MethodGet, "/api/agent/commands", nil, &commands, headers); err != nil {
 		return nil, fmt.Errorf("poll commands: %w", err)
 	}
 	return commands, nil
@@ -142,7 +145,7 @@ func (c *Client) PostSecurity(security SecurityEvent) error {
 	return nil
 }
 
-func (c *Client) doJSON(method, path string, input, output any) error {
+func (c *Client) doJSON(method, path string, input, output any, extraHeaders ...map[string]string) error {
 	var body io.Reader
 	if input != nil {
 		encoded, err := json.Marshal(input)
@@ -162,6 +165,11 @@ func (c *Client) doJSON(method, path string, input, output any) error {
 	}
 	if c.token != "" {
 		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	for _, headers := range extraHeaders {
+		for key, value := range headers {
+			request.Header.Set(key, value)
+		}
 	}
 
 	response, err := c.http.Do(request)

@@ -56,6 +56,20 @@ func TestPollUsesBearerAndReturnsCommands(t *testing.T) {
 	}
 }
 
+func TestPollSendsAgentVersionHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Satsetops-Agent-Version") == "" {
+			t.Fatal("expected X-Satsetops-Agent-Version header to be set")
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+
+	if _, err := New(server.URL, "perm-123").Poll(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestPollReturnsUnauthorizedSentinel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

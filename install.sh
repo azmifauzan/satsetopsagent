@@ -37,6 +37,12 @@ umask 077
 printf 'SATSETOPS_URL=%s\nSATSETOPS_TOKEN=%s\n' "$SATSETOPS_URL" "$SATSETOPS_TOKEN" \
     > /etc/satsetops/agent.env
 
+# A fresh SATSETOPS_TOKEN means fresh registration is intended. Without this,
+# a leftover token.enc from a prior install on the same machine (reused VPS,
+# retry, reinstall) makes the agent silently reuse the old permanent token
+# and ignore the new one-time token entirely.
+rm -f /etc/satsetops/token.enc
+
 cat > /etc/systemd/system/satsetops-agent.service <<'UNIT'
 [Unit]
 Description=SatSetOps VPS Agent
