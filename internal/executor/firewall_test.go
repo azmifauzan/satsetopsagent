@@ -150,6 +150,25 @@ func TestSetFirewallRuleOnRHELAddsPort(t *testing.T) {
 	}
 }
 
+func TestSetFirewallRuleOnRHELDefaultsToTcpWhenPayloadHasNoProtocol(t *testing.T) {
+	// The only real caller (ToolRegistry.php's AI tool-calling path) always
+	// sends a bare integer port with no protocol suffix — firewall-cmd's
+	// --add-port requires one ("8080" alone is a syntax error), unlike ufw
+	// which tolerates a bare port fine.
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "rocky|"
+	runner.Outputs["firewall-cmd --permanent --add-port=8080/tcp"] = ""
+	runner.Outputs["firewall-cmd --reload"] = ""
+
+	_, err := setFirewallRule(map[string]any{"port": 8080}, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !runner.HasCommand("firewall-cmd --permanent --add-port=8080/tcp") {
+		t.Errorf("expected add-port to default to /tcp, got: %v", runner.Commands)
+	}
+}
+
 func TestSetFirewallRuleOnArchAddsIptablesRule(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs[osReleaseCmd] = "manjaro|arch"

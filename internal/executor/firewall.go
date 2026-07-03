@@ -126,7 +126,16 @@ func setFirewallRule(payload map[string]any, runner exec.Runner) (string, error)
 
 	switch family {
 	case distro.RHEL:
-		return setFirewallRuleRHEL(runner, portStr, action)
+		// firewall-cmd's --add-port/--remove-port require an explicit
+		// protocol (e.g. "8080/tcp") — unlike ufw, "8080" alone is a syntax
+		// error. The only real caller (ToolRegistry's AI tool-calling path)
+		// always sends a bare integer port with no protocol, so default to
+		// tcp whenever the payload didn't specify one.
+		portWithProto := portStr
+		if len(parts) == 1 {
+			portWithProto = parts[0] + "/tcp"
+		}
+		return setFirewallRuleRHEL(runner, portWithProto, action)
 	case distro.Arch:
 		return setFirewallRuleArch(runner, parts[0], action)
 	default:
