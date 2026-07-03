@@ -1,4 +1,3 @@
-// satsetopsagent/internal/distro/distro.go
 package distro
 
 import (
