@@ -101,6 +101,45 @@ func TestScanVPSFlagsUnexpectedPort(t *testing.T) {
 	}
 }
 
+// TestScanVPSCleanOnTencentCloudCVMBaseline reproduces the exact port/service
+// fingerprint of a stock Tencent Cloud CVM Ubuntu 24.04 image (port 53 from
+// systemd-resolved's DNS stub listener, plus acpid/ModemManager/udisks2/
+// upower/tat_agent — all installed by the base image itself, not the user).
+// Found live 2026-07-03: without these, no real Tencent Cloud VPS could ever
+// pass a clean scan.
+func TestScanVPSCleanOnTencentCloudCVMBaseline(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["ss -tuln"] = "" +
+		"tcp   LISTEN 0 128 127.0.0.54:53 0.0.0.0:*\n" +
+		"tcp   LISTEN 0 128 127.0.0.53:53 0.0.0.0:*\n" +
+		"tcp   LISTEN 0 128 0.0.0.0:22    0.0.0.0:*\n" +
+		"tcp   LISTEN 0 128 [::]:22       [::]:*\n"
+	runner.Outputs["systemctl list-units --type=service --state=running"] = "" +
+		"  acpid.service         loaded active running ACPI event daemon\n" +
+		"  ModemManager.service  loaded active running Modem Manager\n" +
+		"  udisks2.service       loaded active running Disk Manager\n" +
+		"  upower.service        loaded active running Daemon for power management\n" +
+		"  tat_agent.service     loaded active running tat_agent\n" +
+		"  ssh.service           loaded active running OpenBSD Secure Shell server\n" +
+		"  systemd-resolved.service loaded active running Network Name Resolution\n"
+
+	output, err := Dispatch("scan_vps", nil, runner)
+	if err != nil {
+		t.Fatalf("scan_vps: %v", err)
+	}
+
+	var report map[string]any
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("invalid report JSON: %v", err)
+	}
+	if report["clean"] != true {
+		t.Fatalf("expected clean=true on a stock Tencent Cloud CVM image, got: %s", output)
+	}
+	if findings, _ := report["findings"].([]any); len(findings) != 0 {
+		t.Fatalf("expected no findings on a stock Tencent Cloud CVM image, got: %v", findings)
+	}
+}
+
 func TestScanVPSAllowsOwnNginxCertbotPortsOnRescan(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs["docker inspect -f {{.State.Running}} nginx-certbot"] = "true\n"

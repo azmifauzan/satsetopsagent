@@ -17,6 +17,7 @@ import (
 // miss (postgres, php-fpm, random custom panels, etc).
 var basePortsAllowed = map[string]bool{
 	"22": true, // sshd
+	"53": true, // systemd-resolved's DNS stub listener, on by default on stock Ubuntu 20.04+
 }
 
 // baseServicesAllowed are systemd services present on a normal, unmodified
@@ -57,6 +58,10 @@ var baseServicesAllowed = map[string]bool{
 	"cloud-init-local.service":      true,
 	"cloud-config.service":          true,
 	"cloud-final.service":           true,
+	"acpid.service":                 true,
+	"ModemManager.service":          true,
+	"udisks2.service":               true,
+	"upower.service":                true,
 	// Cloud provider guest agents.
 	"qemu-guest-agent.service":      true,
 	"open-vm-tools.service":         true,
@@ -64,6 +69,7 @@ var baseServicesAllowed = map[string]bool{
 	"google-guest-agent.service":    true,
 	"google-osconfig-agent.service": true,
 	"amazon-ssm-agent.service":      true,
+	"tat_agent.service":             true, // Tencent Cloud (CVM) guest agent
 }
 
 // baseServicePrefixesAllowed covers templated units (name@instance.service).
