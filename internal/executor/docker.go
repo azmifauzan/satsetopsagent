@@ -15,7 +15,7 @@ func dockerHarden(payload map[string]any, runner exec.Runner) (string, error) {
   "userland-proxy": false,
   "no-new-privileges": true
 }`
-	
+
 	// Create /etc/docker if not exists
 	_, _ = runner.Run("mkdir", "-p", "/etc/docker")
 

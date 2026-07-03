@@ -33,12 +33,12 @@ func CollectTraffic(runner exec.Runner) (api.TrafficSummary, error) {
 	}
 
 	lines := strings.Split(output, "\n")
-	
+
 	var totalRequests uint32
 	var requests4xx uint32
 	var requests5xx uint32
 	var bandwidthBytes uint64
-	
+
 	pathCounts := make(map[string]uint32)
 	ipCounts := make(map[string]uint32)
 
@@ -47,36 +47,36 @@ func CollectTraffic(runner exec.Runner) (api.TrafficSummary, error) {
 		if line == "" {
 			continue
 		}
-		
+
 		matches := nginxLogRegex.FindStringSubmatch(line)
 		if len(matches) < 5 {
 			continue
 		}
-		
+
 		ip := matches[1]
 		path := matches[2]
 		statusStr := matches[3]
 		bytesStr := matches[4]
-		
+
 		// Strip query parameters from path for cleaner aggregation
 		if idx := strings.Index(path, "?"); idx != -1 {
 			path = path[:idx]
 		}
 
 		totalRequests++
-		
+
 		status, _ := strconv.Atoi(statusStr)
 		if status >= 400 && status < 500 {
 			requests4xx++
 		} else if status >= 500 && status < 600 {
 			requests5xx++
 		}
-		
+
 		if bytesStr != "-" {
 			bytes, _ := strconv.ParseUint(bytesStr, 10, 64)
 			bandwidthBytes += bytes
 		}
-		
+
 		pathCounts[path]++
 		ipCounts[ip]++
 	}
@@ -86,7 +86,7 @@ func CollectTraffic(runner exec.Runner) (api.TrafficSummary, error) {
 		Key   string
 		Value uint32
 	}
-	
+
 	var paths []kv
 	for k, v := range pathCounts {
 		paths = append(paths, kv{k, v})
@@ -94,7 +94,7 @@ func CollectTraffic(runner exec.Runner) (api.TrafficSummary, error) {
 	sort.Slice(paths, func(i, j int) bool {
 		return paths[i].Value > paths[j].Value
 	})
-	
+
 	var topPaths []api.PathCount
 	for i := 0; i < len(paths) && i < 5; i++ {
 		topPaths = append(topPaths, api.PathCount{
@@ -111,7 +111,7 @@ func CollectTraffic(runner exec.Runner) (api.TrafficSummary, error) {
 	sort.Slice(ips, func(i, j int) bool {
 		return ips[i].Value > ips[j].Value
 	})
-	
+
 	var topIPs []api.IPCount
 	for i := 0; i < len(ips) && i < 5; i++ {
 		topIPs = append(topIPs, api.IPCount{

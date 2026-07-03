@@ -12,6 +12,8 @@ func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (s
 	switch commandType {
 	case "scan_vps":
 		return scanVPS(runner)
+	case "apt_upgrade":
+		return aptUpgrade(payload, runner)
 	case "harden_firewall":
 		return hardenFirewall(payload, runner)
 	case "ssh_harden":
