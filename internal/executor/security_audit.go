@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/satsetops/agent/internal/distro"
 	"github.com/satsetops/agent/internal/exec"
 )
 
@@ -17,19 +18,19 @@ type auditFinding struct {
 }
 
 func securityAudit(runner exec.Runner) (string, error) {
-	var findings []auditFinding
+	findings := []auditFinding{}
+
+	family, familyErr := distro.Detect(runner)
 
 	osRelease, _ := runner.Run("sh", "-c", ". /etc/os-release && printf '%s|%s' \"$ID\" \"$VERSION_ID\"")
 	osID, osVersion, _ := strings.Cut(osRelease, "|")
 
-	securityPending := securityUpdatesPending(runner)
+	securityPending := securityUpdatesPending(runner, family)
 	_, rebootErr := runner.Run("test", "-f", "/var/run/reboot-required")
 
-	ufwStatus, _ := runner.Run("ufw", "status", "verbose")
-	firewallActive := strings.Contains(ufwStatus, "Status: active")
-	firewallDefaultDeny := strings.Contains(ufwStatus, "Default: deny (incoming)")
+	firewallActive, firewallDefaultDeny := firewallStatus(runner, family)
 	if !firewallActive || !firewallDefaultDeny {
-		findings = append(findings, auditFinding{"high", "firewall_not_hardened", "UFW tidak aktif atau default incoming bukan deny", "harden_firewall", true})
+		findings = append(findings, auditFinding{"high", "firewall_not_hardened", "Firewall tidak aktif atau default incoming bukan deny", "harden_firewall", true})
 	}
 
 	ports, _ := runner.Run("ss", "-tuln")
@@ -39,9 +40,13 @@ func securityAudit(runner exec.Runner) (string, error) {
 		findings = append(findings, auditFinding{"medium", "ssh_baseline_missing", "Baseline SSH hardening belum lengkap", "ssh_harden", true})
 	}
 
-	crowdsecActive := isActive(runner, "crowdsec")
-	bouncerActive := isActive(runner, "crowdsec-firewall-bouncer")
-	if !crowdsecActive || !bouncerActive {
+	// CrowdSec has no supported install path on Arch (see install_crowdsec) —
+	// don't penalize the score for a gap that's a known, accepted platform
+	// limitation rather than a misconfiguration.
+	crowdsecApplicable := family != distro.Arch
+	crowdsecActive := crowdsecApplicable && isActive(runner, "crowdsec")
+	bouncerActive := crowdsecApplicable && isActive(runner, "crowdsec-firewall-bouncer")
+	if crowdsecApplicable && (!crowdsecActive || !bouncerActive) {
 		findings = append(findings, auditFinding{"medium", "crowdsec_missing", "CrowdSec atau firewall bouncer belum aktif", "install_crowdsec", true})
 	}
 
@@ -65,6 +70,9 @@ func securityAudit(runner exec.Runner) (string, error) {
 	if rebootErr == nil {
 		findings = append(findings, auditFinding{"medium", "reboot_required", "VPS membutuhkan reboot untuk menyelesaikan update", "reboot_server", true})
 	}
+	if familyErr != nil || family == distro.Unknown {
+		findings = append(findings, auditFinding{"low", "distro_unrecognized", "Distro tidak dikenali — sebagian pengecekan mungkin tidak akurat", "", false})
+	}
 
 	score := auditScore(findings)
 	status := "healthy"
@@ -81,6 +89,7 @@ func securityAudit(runner exec.Runner) (string, error) {
 			"id":      osID,
 			"version": osVersion,
 		},
+		"distro_family": string(family),
 		"updates": map[string]any{
 			"security_pending": securityPending,
 			"reboot_required":  rebootErr == nil,
@@ -93,7 +102,8 @@ func securityAudit(runner exec.Runner) (string, error) {
 		"ssh": map[string]bool{
 			"baseline_ok": sshOK,
 		},
-		"crowdsec": map[string]bool{
+		"crowdsec": map[string]any{
+			"applicable":     crowdsecApplicable,
 			"active":         crowdsecActive,
 			"bouncer_active": bouncerActive,
 		},
@@ -113,8 +123,39 @@ func securityAudit(runner exec.Runner) (string, error) {
 	return string(encoded), nil
 }
 
-func securityUpdatesPending(runner exec.Runner) int {
-	out, err := runner.Run("bash", "-c", "apt-get -s upgrade 2>/dev/null | grep -ci '^Inst .*Security'")
+func firewallStatus(runner exec.Runner, family distro.Family) (active, defaultDeny bool) {
+	switch family {
+	case distro.RHEL:
+		state, _ := runner.Run("firewall-cmd", "--state")
+		active = strings.TrimSpace(state) == "running"
+		// firewalld's public zone (SatsetOps' default) rejects anything not
+		// explicitly allowed — there's no separate "default policy" line to
+		// grep the way ufw has one, so "active" already implies deny-by-default.
+		defaultDeny = active
+	case distro.Arch:
+		out, _ := runner.Run("iptables", "-L", "INPUT")
+		active = strings.Contains(out, "Chain INPUT")
+		defaultDeny = strings.Contains(out, "policy DROP")
+	default:
+		ufwStatus, _ := runner.Run("ufw", "status", "verbose")
+		active = strings.Contains(ufwStatus, "Status: active")
+		defaultDeny = strings.Contains(ufwStatus, "Default: deny (incoming)")
+	}
+	return active, defaultDeny
+}
+
+func securityUpdatesPending(runner exec.Runner, family distro.Family) int {
+	var cmd string
+	switch family {
+	case distro.RHEL:
+		cmd = "dnf -q check-update --security 2>/dev/null | grep -c ."
+	case distro.Arch:
+		return 0 // no security-only update classification on Arch; apt_upgrade covers the one-time case
+	default:
+		cmd = "apt-get -s upgrade 2>/dev/null | grep -ci '^Inst .*Security'"
+	}
+
+	out, err := runner.Run("bash", "-c", cmd)
 	if err != nil {
 		return 0
 	}
