@@ -10,6 +10,7 @@ import (
 
 func TestSysupdateHarden(t *testing.T) {
 	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "ubuntu|"
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades"] = ""
 	runner.Outputs["bash -c echo -e 'Unattended-Upgrade::Allowed-Origins {\\n\\t\"${distro_id}:${distro_codename}-security\";\\n\\t// Extended Security Maintenance (ESM)\\n\\t\"${distro_id}ESMApps:${distro_codename}-apps-security\";\\n\\t\"${distro_id}ESM:${distro_codename}-infra-security\";\\n};\\nUnattended-Upgrade::Package-Blacklist {\\n};\\nUnattended-Upgrade::AutoFixInterruptedDpkg \"true\";\\nUnattended-Upgrade::MinimalSteps \"true\";\\nUnattended-Upgrade::InstallOnShutdown \"false\";\\nUnattended-Upgrade::Remove-Unused-Kernel-Packages \"true\";\\nUnattended-Upgrade::Remove-Unused-Dependencies \"true\";\\nUnattended-Upgrade::Automatic-Reboot \"false\";\\n' > /etc/apt/apt.conf.d/50unattended-upgrades"] = ""
 	runner.Outputs["bash -c echo -e 'APT::Periodic::Update-Package-Lists \"1\";\\nAPT::Periodic::Unattended-Upgrade \"1\";\\n' > /etc/apt/apt.conf.d/20auto-upgrades"] = ""
@@ -34,5 +35,53 @@ func TestSysupdateHarden(t *testing.T) {
 
 	if !runner.HasCommand("bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades") {
 		t.Errorf("expected unattended-upgrades install command")
+	}
+}
+
+func TestSysupdateHardenOnRHELUsesDnfAutomatic(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "rocky|"
+	runner.Outputs["bash -c dnf install -y dnf-automatic"] = ""
+	runner.Outputs["bash -c echo -e 'apply_updates = yes\\nupgrade_type = security\\n' > /etc/dnf/automatic.conf"] = ""
+	runner.Outputs["systemctl enable --now dnf-automatic.timer"] = ""
+	runner.Errors["test -f /var/run/reboot-required"] = errors.New("not required")
+
+	output, err := sysupdateHarden(nil, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result struct {
+		SecurityUpdatesConfigured bool `json:"security_updates_configured"`
+		Skipped                   bool `json:"skipped"`
+	}
+	json.Unmarshal([]byte(output), &result)
+	if !result.SecurityUpdatesConfigured || result.Skipped {
+		t.Fatalf("unexpected result: %s", output)
+	}
+	if !runner.HasCommand("systemctl enable --now dnf-automatic.timer") {
+		t.Errorf("expected dnf-automatic timer to be enabled, got: %v", runner.Commands)
+	}
+}
+
+func TestSysupdateHardenSkipsOnArch(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "arch|"
+
+	output, err := sysupdateHarden(nil, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result struct {
+		SecurityUpdatesConfigured bool `json:"security_updates_configured"`
+		Skipped                   bool `json:"skipped"`
+	}
+	json.Unmarshal([]byte(output), &result)
+	if result.SecurityUpdatesConfigured || !result.Skipped {
+		t.Fatalf("expected a clean skip on Arch, got: %s", output)
+	}
+	if len(runner.Commands) != 1 { // only the os-release read, nothing else touched
+		t.Fatalf("expected Arch to touch nothing else, got commands: %v", runner.Commands)
 	}
 }
