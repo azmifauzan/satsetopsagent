@@ -5,20 +5,46 @@ import (
 	"net"
 	"strings"
 
+	"github.com/satsetops/agent/internal/distro"
 	"github.com/satsetops/agent/internal/exec"
 )
 
 func installCrowdsec(payload map[string]any, runner exec.Runner) (string, error) {
+	family, err := distro.Detect(runner)
+	if err != nil {
+		return "", fmt.Errorf("detect distro: %w", err)
+	}
+
+	// Arch has no first-party CrowdSec package or repo (AUR-only, which
+	// this agent deliberately never uses — AUR packages are unreviewed
+	// community submissions, not something to auto-install as root).
+	// Reporting a clean skip here — rather than a failure — keeps the rest
+	// of the hardening batch going instead of aborting on it.
+	if family == distro.Arch {
+		return "crowdsec installation skipped: no supported package source on Arch", nil
+	}
+
+	repoScript := "script.deb.sh"
+	installCmd := "DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"
+	bouncerCmd := "DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables"
+	if family == distro.RHEL {
+		repoScript = "script.rpm.sh"
+		manager := "dnf"
+		if !distro.CommandExists(runner, "dnf") {
+			manager = "yum"
+		}
+		installCmd = manager + " install -y crowdsec"
+		bouncerCmd = manager + " install -y crowdsec-firewall-bouncer-iptables"
+	}
+
 	// Add repo
-	_, err := runner.Run("bash", "-c", "curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash")
+	_, err = runner.Run("bash", "-c", "curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/"+repoScript+" | bash")
 	if err != nil {
 		return "", fmt.Errorf("failed to add crowdsec repo: %w", err)
 	}
 
-	// Install engine. DEBIAN_FRONTEND=noninteractive is required: apt-get
-	// otherwise tries a debconf dialog and fails outright under systemd,
-	// which gives the process no controlling TTY.
-	_, err = runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec")
+	// Install engine.
+	_, err = runner.Run("bash", "-c", installCmd)
 	if err != nil {
 		return "", fmt.Errorf("failed to install crowdsec engine: %w", err)
 	}
@@ -50,7 +76,7 @@ CPUQuota=20%
 	}
 
 	// Install bouncer
-	_, err = runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables")
+	_, err = runner.Run("bash", "-c", bouncerCmd)
 	if err != nil {
 		return "", fmt.Errorf("failed to install crowdsec bouncer: %w", err)
 	}
@@ -65,8 +91,10 @@ CPUQuota=20%
 		return "", fmt.Errorf("failed to restart crowdsec: %w", err)
 	}
 
-	if err := whitelistPlatformIPs(payload, runner); err != nil {
-		return "", err
+	if payload != nil {
+		if err := whitelistPlatformIPs(payload, runner); err != nil {
+			return "", err
+		}
 	}
 
 	return "crowdsec installed with bouncer and limits", nil
