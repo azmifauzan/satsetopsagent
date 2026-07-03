@@ -108,6 +108,8 @@ func TestScanVPSFlagsUnexpectedPort(t *testing.T) {
 // client), port 323 (chrony's local NTP control socket), and
 // networkd-dispatcher.service — plus satsetops-agent.service itself, which
 // must never be flagged since the agent has to be running to scan at all.
+// A third round added fwupd.service (Linux firmware update daemon, stock
+// since before this box was ever used for testing).
 func TestScanVPSCleanOnTencentCloudCVMBaseline(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs["ss -tuln"] = "" +
@@ -127,6 +129,7 @@ func TestScanVPSCleanOnTencentCloudCVMBaseline(t *testing.T) {
 		"  udisks2.service             loaded active running Disk Manager\n" +
 		"  upower.service              loaded active running Daemon for power management\n" +
 		"  tat_agent.service           loaded active running tat_agent\n" +
+		"  fwupd.service               loaded active running Firmware update daemon\n" +
 		"  networkd-dispatcher.service loaded active running Dispatcher daemon for systemd-networkd\n" +
 		"  satsetops-agent.service     loaded active running SatSetOps VPS Agent\n" +
 		"  ssh.service                 loaded active running OpenBSD Secure Shell server\n" +

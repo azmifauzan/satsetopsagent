@@ -64,6 +64,7 @@ var baseServicesAllowed = map[string]bool{
 	"ModemManager.service":          true,
 	"udisks2.service":               true,
 	"upower.service":                true,
+	"fwupd.service":                 true,
 	"networkd-dispatcher.service":   true,
 	// The agent has to be running to perform this scan at all — it must
 	// never flag itself as an unexpected finding.
