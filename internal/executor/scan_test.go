@@ -102,26 +102,36 @@ func TestScanVPSFlagsUnexpectedPort(t *testing.T) {
 }
 
 // TestScanVPSCleanOnTencentCloudCVMBaseline reproduces the exact port/service
-// fingerprint of a stock Tencent Cloud CVM Ubuntu 24.04 image (port 53 from
-// systemd-resolved's DNS stub listener, plus acpid/ModemManager/udisks2/
-// upower/tat_agent — all installed by the base image itself, not the user).
-// Found live 2026-07-03: without these, no real Tencent Cloud VPS could ever
-// pass a clean scan.
+// fingerprint captured live from a stock Tencent Cloud CVM Ubuntu 24.04 test
+// VPS (2026-07-03), including a second round of false positives caught only
+// after a real onboarding attempt still reported "not clean": port 68 (DHCP
+// client), port 323 (chrony's local NTP control socket), and
+// networkd-dispatcher.service — plus satsetops-agent.service itself, which
+// must never be flagged since the agent has to be running to scan at all.
 func TestScanVPSCleanOnTencentCloudCVMBaseline(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs["ss -tuln"] = "" +
-		"tcp   LISTEN 0 128 127.0.0.54:53 0.0.0.0:*\n" +
-		"tcp   LISTEN 0 128 127.0.0.53:53 0.0.0.0:*\n" +
-		"tcp   LISTEN 0 128 0.0.0.0:22    0.0.0.0:*\n" +
-		"tcp   LISTEN 0 128 [::]:22       [::]:*\n"
+		"udp   UNCONN 0 0    127.0.0.54:53        0.0.0.0:*\n" +
+		"udp   UNCONN 0 0 127.0.0.53%lo:53        0.0.0.0:*\n" +
+		"udp   UNCONN 0 0 10.11.8.173%eth0:68     0.0.0.0:*\n" +
+		"udp   UNCONN 0 0    127.0.0.1:323        0.0.0.0:*\n" +
+		"udp   UNCONN 0 0        [::1]:323           [::]:*\n" +
+		"tcp   LISTEN 0 4096  127.0.0.54:53        0.0.0.0:*\n" +
+		"tcp   LISTEN 0 4096 127.0.0.53%lo:53      0.0.0.0:*\n" +
+		"tcp   LISTEN 0 4096     0.0.0.0:22        0.0.0.0:*\n" +
+		"tcp   LISTEN 0 4096        [::]:22           [::]:*\n"
 	runner.Outputs["systemctl list-units --type=service --state=running"] = "" +
-		"  acpid.service         loaded active running ACPI event daemon\n" +
-		"  ModemManager.service  loaded active running Modem Manager\n" +
-		"  udisks2.service       loaded active running Disk Manager\n" +
-		"  upower.service        loaded active running Daemon for power management\n" +
-		"  tat_agent.service     loaded active running tat_agent\n" +
-		"  ssh.service           loaded active running OpenBSD Secure Shell server\n" +
-		"  systemd-resolved.service loaded active running Network Name Resolution\n"
+		"  acpid.service               loaded active running ACPI event daemon\n" +
+		"  chrony.service              loaded active running chrony, an NTP client/server\n" +
+		"  ModemManager.service        loaded active running Modem Manager\n" +
+		"  udisks2.service             loaded active running Disk Manager\n" +
+		"  upower.service              loaded active running Daemon for power management\n" +
+		"  tat_agent.service           loaded active running tat_agent\n" +
+		"  networkd-dispatcher.service loaded active running Dispatcher daemon for systemd-networkd\n" +
+		"  satsetops-agent.service     loaded active running SatSetOps VPS Agent\n" +
+		"  ssh.service                 loaded active running OpenBSD Secure Shell server\n" +
+		"  systemd-resolved.service    loaded active running Network Name Resolution\n" +
+		"  systemd-networkd.service    loaded active running Network Configuration\n"
 
 	output, err := Dispatch("scan_vps", nil, runner)
 	if err != nil {

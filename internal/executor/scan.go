@@ -16,8 +16,10 @@ import (
 // blacklist of "known bad" software, so it catches things a blacklist would
 // miss (postgres, php-fpm, random custom panels, etc).
 var basePortsAllowed = map[string]bool{
-	"22": true, // sshd
-	"53": true, // systemd-resolved's DNS stub listener, on by default on stock Ubuntu 20.04+
+	"22":  true, // sshd
+	"53":  true, // systemd-resolved's DNS stub listener, on by default on stock Ubuntu 20.04+
+	"68":  true, // DHCP client (systemd-networkd/dhclient) on the primary interface
+	"323": true, // chrony's local NTP control socket (chronyc talks to chronyd here)
 }
 
 // baseServicesAllowed are systemd services present on a normal, unmodified
@@ -62,6 +64,10 @@ var baseServicesAllowed = map[string]bool{
 	"ModemManager.service":          true,
 	"udisks2.service":               true,
 	"upower.service":                true,
+	"networkd-dispatcher.service":   true,
+	// The agent has to be running to perform this scan at all — it must
+	// never flag itself as an unexpected finding.
+	"satsetops-agent.service": true,
 	// Cloud provider guest agents.
 	"qemu-guest-agent.service":      true,
 	"open-vm-tools.service":         true,
