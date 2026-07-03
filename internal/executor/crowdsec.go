@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/satsetops/agent/internal/exec"
@@ -64,5 +65,42 @@ CPUQuota=20%
 		return "", fmt.Errorf("failed to restart crowdsec: %w", err)
 	}
 
+	if err := whitelistPlatformIPs(payload, runner); err != nil {
+		return "", err
+	}
+
 	return "crowdsec installed with bouncer and limits", nil
+}
+
+// whitelistPlatformIPs allowlists SatsetOps' own outbound IP(s) (SSH
+// auto-provisioning, SSH Console) in CrowdSec so a burst of legitimate
+// connections is never mistaken for a bruteforce attempt — an auto-ban here
+// would permanently lock the platform out of the box, with no other way
+// back in.
+func whitelistPlatformIPs(payload map[string]any, runner exec.Runner) error {
+	raw, ok := payload["whitelist_ips"].([]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+
+	const listName = "satsetops-platform"
+
+	_, err := runner.Run("cscli", "allowlists", "create", listName, "-d", "SatsetOps platform IPs")
+	if err != nil && !strings.Contains(err.Error(), "already exist") {
+		return fmt.Errorf("failed to create crowdsec allowlist: %w", err)
+	}
+
+	for _, ip := range raw {
+		ipStr, ok := ip.(string)
+		if !ok || net.ParseIP(ipStr) == nil {
+			continue
+		}
+
+		_, err := runner.Run("cscli", "allowlists", "add", listName, ipStr)
+		if err != nil && !strings.Contains(err.Error(), "already") {
+			return fmt.Errorf("failed to whitelist %s: %w", ipStr, err)
+		}
+	}
+
+	return nil
 }
