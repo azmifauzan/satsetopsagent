@@ -222,3 +222,98 @@ func TestRunningServicesSkipsHeaderAndFooterLines(t *testing.T) {
 		t.Fatalf("expected only ssh.service, got %v", services)
 	}
 }
+
+func TestScanVPSReportsDetectedDistroFamily(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["ss -tuln"] = "tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:*\n"
+	runner.Outputs["systemctl list-units --type=service --state=running"] = "  ssh.service loaded active running OpenBSD Secure Shell server\n"
+	runner.Outputs[`sh -c . /etc/os-release && printf '%s|%s' "$ID" "$ID_LIKE"`] = "rocky|"
+
+	output, err := Dispatch("scan_vps", nil, runner)
+	if err != nil {
+		t.Fatalf("scan_vps: %v", err)
+	}
+
+	var report map[string]any
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("invalid report JSON: %v", err)
+	}
+	if report["distro_family"] != "rhel" {
+		t.Fatalf("expected distro_family=rhel, got: %v", report["distro_family"])
+	}
+	if report["distro_warning"] != "" {
+		t.Fatalf("expected no warning for a known family, got: %v", report["distro_warning"])
+	}
+}
+
+func TestScanVPSWarnsButStaysCleanOnUnknownDistro(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["ss -tuln"] = "tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:*\n"
+	runner.Outputs["systemctl list-units --type=service --state=running"] = "  ssh.service loaded active running OpenBSD Secure Shell server\n"
+	runner.Outputs[`sh -c . /etc/os-release && printf '%s|%s' "$ID" "$ID_LIKE"`] = "opensuse-leap|suse opensuse"
+
+	output, err := Dispatch("scan_vps", nil, runner)
+	if err != nil {
+		t.Fatalf("scan_vps: %v", err)
+	}
+
+	var report map[string]any
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("invalid report JSON: %v", err)
+	}
+	if report["distro_family"] != "unknown" {
+		t.Fatalf("expected distro_family=unknown, got: %v", report["distro_family"])
+	}
+	if report["distro_warning"] == "" {
+		t.Fatal("expected a non-empty warning for an unrecognized distro")
+	}
+	if report["clean"] != true {
+		t.Fatal("an unrecognized distro must not block onboarding — clean should stay true when nothing else is wrong")
+	}
+}
+
+func TestScanVPSCleanOnStockRHELBaseline(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["ss -tuln"] = "tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:*\n"
+	runner.Outputs["systemctl list-units --type=service --state=running"] = "" +
+		"  sshd.service        loaded active running OpenSSH server daemon\n" +
+		"  firewalld.service   loaded active running firewalld - dynamic firewall daemon\n" +
+		"  auditd.service      loaded active running Security Auditing Service\n" +
+		"  chronyd.service     loaded active running NTP client/server\n" +
+		"  crond.service       loaded active running Command Scheduler\n" +
+		"  rsyslog.service     loaded active running System Logging Service\n" +
+		"  NetworkManager.service loaded active running Network Manager\n"
+	runner.Outputs[`sh -c . /etc/os-release && printf '%s|%s' "$ID" "$ID_LIKE"`] = "rocky|"
+
+	output, err := Dispatch("scan_vps", nil, runner)
+	if err != nil {
+		t.Fatalf("scan_vps: %v", err)
+	}
+
+	var report map[string]any
+	json.Unmarshal([]byte(output), &report)
+	if report["clean"] != true {
+		t.Fatalf("expected clean=true on a stock RHEL-family image, got: %s", output)
+	}
+}
+
+func TestScanVPSCleanOnStockArchBaseline(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["ss -tuln"] = "tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:*\n"
+	runner.Outputs["systemctl list-units --type=service --state=running"] = "" +
+		"  sshd.service          loaded active running OpenSSH Daemon\n" +
+		"  systemd-timesyncd.service loaded active running Network Time Synchronization\n" +
+		"  NetworkManager.service loaded active running Network Manager\n"
+	runner.Outputs[`sh -c . /etc/os-release && printf '%s|%s' "$ID" "$ID_LIKE"`] = "arch|"
+
+	output, err := Dispatch("scan_vps", nil, runner)
+	if err != nil {
+		t.Fatalf("scan_vps: %v", err)
+	}
+
+	var report map[string]any
+	json.Unmarshal([]byte(output), &report)
+	if report["clean"] != true {
+		t.Fatalf("expected clean=true on a stock Arch image, got: %s", output)
+	}
+}

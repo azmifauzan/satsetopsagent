@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/satsetops/agent/internal/distro"
 	"github.com/satsetops/agent/internal/exec"
 )
 
@@ -66,6 +67,16 @@ var baseServicesAllowed = map[string]bool{
 	"upower.service":                true,
 	"fwupd.service":                 true,
 	"networkd-dispatcher.service":   true,
+	// RHEL-family (CentOS/Rocky/AlmaLinux/Fedora) baseline.
+	"firewalld.service":      true,
+	"auditd.service":         true,
+	"chronyd.service":        true,
+	"crond.service":          true,
+	"NetworkManager.service": true,
+	"sssd.service":           true,
+	"tuned.service":          true,
+	"restraintd.service":     true,
+	"kdump.service":          true,
 	// The agent has to be running to perform this scan at all — it must
 	// never flag itself as an unexpected finding.
 	"satsetops-agent.service": true,
@@ -125,18 +136,28 @@ func scanVPS(runner exec.Runner) (string, error) {
 		findings = []string{}
 	}
 
+	family, familyErr := distro.Detect(runner)
+	distroWarning := ""
+	if familyErr != nil || family == distro.Unknown {
+		distroWarning = "Distro tidak dikenali — SatsetOps mendukung Debian/Ubuntu, RHEL-family (CentOS/Rocky/AlmaLinux/Fedora), dan Arch/Manjaro. Beberapa langkah hardening mungkin gagal atau perlu ditangani manual."
+	}
+
 	report := struct {
-		Docker       bool     `json:"docker"`
-		Clean        bool     `json:"clean"`
-		Findings     []string `json:"findings"`
-		OS           string   `json:"os"`
-		Architecture string   `json:"architecture"`
+		Docker        bool     `json:"docker"`
+		Clean         bool     `json:"clean"`
+		Findings      []string `json:"findings"`
+		OS            string   `json:"os"`
+		Architecture  string   `json:"architecture"`
+		DistroFamily  string   `json:"distro_family"`
+		DistroWarning string   `json:"distro_warning"`
 	}{
-		Docker:       dockerSocketError == nil,
-		Clean:        clean,
-		Findings:     findings,
-		OS:           runtime.GOOS,
-		Architecture: runtime.GOARCH,
+		Docker:        dockerSocketError == nil,
+		Clean:         clean,
+		Findings:      findings,
+		OS:            runtime.GOOS,
+		Architecture:  runtime.GOARCH,
+		DistroFamily:  string(family),
+		DistroWarning: distroWarning,
 	}
 
 	encoded, err := json.Marshal(report)
