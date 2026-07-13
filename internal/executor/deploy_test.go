@@ -192,3 +192,26 @@ func TestDeployAppOmitsResourceFlagsWhenNotProvided(t *testing.T) {
 	}
 }
 
+func TestDeployAppTreatsExplicitNullResourceValuesAsAbsent(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["docker pull test-image:latest"] = ""
+	runner.Outputs["docker rm -f test-app"] = ""
+	runner.Outputs["docker run -d --name test-app --network satsetops-proxy --restart unless-stopped test-image:latest"] = "container_id"
+
+	payload := map[string]any{
+		"image":     "test-image:latest",
+		"name":      "test-app",
+		"port":      8080,
+		"ram_mb":    nil,
+		"cpu_cores": nil,
+	}
+
+	if _, err := deployApp(payload, runner); err != nil {
+		t.Fatalf("unexpected error for explicit null resource values: %v", err)
+	}
+
+	if !runner.HasCommand("docker run -d --name test-app --network satsetops-proxy --restart unless-stopped test-image:latest") {
+		t.Errorf("expected unlimited docker run when ram_mb/cpu_cores are null, got: %v", runner.Commands)
+	}
+}
+

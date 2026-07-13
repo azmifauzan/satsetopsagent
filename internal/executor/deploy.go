@@ -67,6 +67,36 @@ func loginRegistry(image string, payload map[string]any, runner exec.Runner) err
 	return nil
 }
 
+// numericFromPayload extracts an optional numeric value from a command
+// payload. present=false (not an error) for a missing key AND for an
+// explicit JSON null — a payload with no configured limit must behave
+// exactly like one that never mentioned the key at all (see the payload
+// null/[] decoding incident from 2026-07-03: the web side can and does send
+// nil for "no value" rather than omitting the key in some serialization
+// paths, and a hard error here would fail the entire deploy over nothing).
+func numericFromPayload(payload map[string]any, key string) (value float64, present bool, err error) {
+	raw, ok := payload[key]
+	if !ok || raw == nil {
+		return 0, false, nil
+	}
+
+	switch v := raw.(type) {
+	case float64:
+		return v, true, nil
+	case int:
+		return float64(v), true, nil
+	case string:
+		parsed, parseErr := strconv.ParseFloat(v, 64)
+		if parseErr != nil {
+			return 0, false, fmt.Errorf("invalid %q in payload: %s", key, v)
+		}
+
+		return parsed, true, nil
+	default:
+		return 0, false, fmt.Errorf("invalid %q type in payload", key)
+	}
+}
+
 func deployApp(payload map[string]any, runner exec.Runner) (string, error) {
 	image, ok := payload["image"].(string)
 	if !ok || image == "" {
@@ -119,46 +149,16 @@ func deployApp(payload map[string]any, runner exec.Runner) (string, error) {
 	// port binding needed — all traffic enters via nginx-certbot on 80/443.
 	args := []string{"run", "-d", "--name", name, "--network", "satsetops-proxy", "--restart", "unless-stopped"}
 
-	if raw, ok := payload["ram_mb"]; ok {
-		var ramMb int
-		switch v := raw.(type) {
-		case float64:
-			ramMb = int(v)
-		case int:
-			ramMb = v
-		case string:
-			parsed, err := strconv.Atoi(v)
-			if err != nil {
-				return "", fmt.Errorf("invalid 'ram_mb' in payload: %s", v)
-			}
-			ramMb = parsed
-		default:
-			return "", fmt.Errorf("invalid 'ram_mb' type in payload")
-		}
-		if ramMb > 0 {
-			args = append(args, "--memory", fmt.Sprintf("%dm", ramMb))
-		}
+	if ramMb, present, err := numericFromPayload(payload, "ram_mb"); err != nil {
+		return "", err
+	} else if present && ramMb > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dm", int(ramMb)))
 	}
 
-	if raw, ok := payload["cpu_cores"]; ok {
-		var cpuCores float64
-		switch v := raw.(type) {
-		case float64:
-			cpuCores = v
-		case int:
-			cpuCores = float64(v)
-		case string:
-			parsed, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				return "", fmt.Errorf("invalid 'cpu_cores' in payload: %s", v)
-			}
-			cpuCores = parsed
-		default:
-			return "", fmt.Errorf("invalid 'cpu_cores' type in payload")
-		}
-		if cpuCores > 0 {
-			args = append(args, "--cpus", strconv.FormatFloat(cpuCores, 'f', -1, 64))
-		}
+	if cpuCores, present, err := numericFromPayload(payload, "cpu_cores"); err != nil {
+		return "", err
+	} else if present && cpuCores > 0 {
+		args = append(args, "--cpus", strconv.FormatFloat(cpuCores, 'f', -1, 64))
 	}
 
 	// Extract env variables
