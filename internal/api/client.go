@@ -22,10 +22,11 @@ type Command struct {
 }
 
 type Metrics struct {
-	CPUPercent    float64 `json:"cpu_percent"`
-	MemoryPercent float64 `json:"mem_percent"`
-	DiskPercent   float64 `json:"disk_percent"`
-	UptimeSeconds uint64  `json:"uptime_seconds"`
+	CPUPercent    float64            `json:"cpu_percent"`
+	MemoryPercent float64            `json:"mem_percent"`
+	DiskPercent   float64            `json:"disk_percent"`
+	UptimeSeconds uint64             `json:"uptime_seconds"`
+	Containers    []ContainerMetric  `json:"containers,omitempty"`
 }
 
 type ContainerMetric struct {

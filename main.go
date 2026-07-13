@@ -85,18 +85,24 @@ func run() error {
 }
 
 func reportMetrics(ctx context.Context, client *api.Client, interval time.Duration) error {
+	runner := &exec.RealRunner{}
+
 	for {
 		metrics, err := reporter.Collect()
 		if err != nil {
 			log.Printf("metric collection failed: %v", err)
-		} else if response, err := client.PostMetrics(metrics); errors.Is(err, api.ErrUnauthorized) {
-			return api.ErrUnauthorized
-		} else if err != nil {
-			log.Printf("metric report failed: %v", err)
-		} else if response.NextIntervalSeconds > 0 {
-			interval = clampMetricsInterval(time.Duration(response.NextIntervalSeconds) * time.Second)
-			if !response.MetricsEnabled {
-				log.Printf("metrics ingest paused by server for %s", interval)
+		} else {
+			metrics.Containers = reporter.CollectContainers(runner)
+
+			if response, err := client.PostMetrics(metrics); errors.Is(err, api.ErrUnauthorized) {
+				return api.ErrUnauthorized
+			} else if err != nil {
+				log.Printf("metric report failed: %v", err)
+			} else if response.NextIntervalSeconds > 0 {
+				interval = clampMetricsInterval(time.Duration(response.NextIntervalSeconds) * time.Second)
+				if !response.MetricsEnabled {
+					log.Printf("metrics ingest paused by server for %s", interval)
+				}
 			}
 		}
 
