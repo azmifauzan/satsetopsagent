@@ -28,6 +28,15 @@ type Metrics struct {
 	UptimeSeconds uint64  `json:"uptime_seconds"`
 }
 
+type ContainerMetric struct {
+	Name       string  `json:"name"`
+	Status     string  `json:"status"`
+	CPUPercent float64 `json:"cpu_percent"`
+	MemPercent float64 `json:"mem_percent"`
+	MemUsageMB float64 `json:"mem_usage_mb"`
+}
+
+
 type MetricsResponse struct {
 	OK                  bool `json:"ok"`
 	MetricsEnabled      bool `json:"metrics_enabled"`
