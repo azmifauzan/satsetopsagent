@@ -9,6 +9,8 @@ import (
 
 	"github.com/satsetops/agent/internal/distro"
 	"github.com/satsetops/agent/internal/exec"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 // basePortsAllowed are the ports a freshly-imaged cloud VPS is expected to
@@ -142,6 +144,15 @@ func scanVPS(runner exec.Runner) (string, error) {
 		distroWarning = "Distro tidak dikenali — SatsetOps mendukung Debian/Ubuntu, RHEL-family (CentOS/Rocky/AlmaLinux/Fedora), dan Arch/Manjaro. Beberapa langkah hardening mungkin gagal atau perlu ditangani manual."
 	}
 
+	// A VPS's core/RAM count doesn't change post-provision, so this is
+	// reported once here rather than on every metrics tick. Best-effort:
+	// if gopsutil can't read it, report 0 rather than failing the whole scan.
+	totalCPUCores, _ := cpu.Counts(true)
+	var totalRAMMB uint64
+	if vm, err := mem.VirtualMemory(); err == nil {
+		totalRAMMB = vm.Total / 1024 / 1024
+	}
+
 	report := struct {
 		Docker        bool     `json:"docker"`
 		Clean         bool     `json:"clean"`
@@ -150,6 +161,8 @@ func scanVPS(runner exec.Runner) (string, error) {
 		Architecture  string   `json:"architecture"`
 		DistroFamily  string   `json:"distro_family"`
 		DistroWarning string   `json:"distro_warning"`
+		TotalCPUCores int      `json:"total_cpu_cores"`
+		TotalRAMMB    uint64   `json:"total_ram_mb"`
 	}{
 		Docker:        dockerSocketError == nil,
 		Clean:         clean,
@@ -158,6 +171,8 @@ func scanVPS(runner exec.Runner) (string, error) {
 		Architecture:  runtime.GOARCH,
 		DistroFamily:  string(family),
 		DistroWarning: distroWarning,
+		TotalCPUCores: totalCPUCores,
+		TotalRAMMB:    totalRAMMB,
 	}
 
 	encoded, err := json.Marshal(report)

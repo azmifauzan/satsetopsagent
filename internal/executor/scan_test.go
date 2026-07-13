@@ -317,3 +317,30 @@ func TestScanVPSCleanOnStockArchBaseline(t *testing.T) {
 		t.Fatalf("expected clean=true on a stock Arch image, got: %s", output)
 	}
 }
+
+func TestScanVPSReportsTotalCPUAndRAM(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["ss -tuln"] = "tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:*\n"
+	runner.Outputs["systemctl list-units --type=service --state=running"] = "  ssh.service loaded active running OpenBSD Secure Shell server\n"
+
+	output, err := Dispatch("scan_vps", nil, runner)
+	if err != nil {
+		t.Fatalf("scan_vps: %v", err)
+	}
+
+	var report map[string]any
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("invalid report JSON: %v", err)
+	}
+
+	totalCPU, ok := report["total_cpu_cores"].(float64)
+	if !ok || totalCPU < 1 {
+		t.Fatalf("expected total_cpu_cores to be a positive number, got: %v", report["total_cpu_cores"])
+	}
+
+	totalRAM, ok := report["total_ram_mb"].(float64)
+	if !ok || totalRAM < 1 {
+		t.Fatalf("expected total_ram_mb to be a positive number, got: %v", report["total_ram_mb"])
+	}
+}
+
