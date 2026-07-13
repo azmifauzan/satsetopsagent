@@ -343,4 +343,3 @@ func TestScanVPSReportsTotalCPUAndRAM(t *testing.T) {
 		t.Fatalf("expected total_ram_mb to be a positive number, got: %v", report["total_ram_mb"])
 	}
 }
-

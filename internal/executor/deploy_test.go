@@ -214,4 +214,3 @@ func TestDeployAppTreatsExplicitNullResourceValuesAsAbsent(t *testing.T) {
 		t.Errorf("expected unlimited docker run when ram_mb/cpu_cores are null, got: %v", runner.Commands)
 	}
 }
-

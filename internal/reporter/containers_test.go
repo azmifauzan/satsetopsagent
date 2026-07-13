@@ -3,6 +3,7 @@ package reporter
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestCollectContainersParsesDockerStatsOutput(t *testing.T) {
@@ -49,6 +50,51 @@ func TestCollectContainersHandlesGiB(t *testing.T) {
 	}
 	if containers[0].MemUsageMB != 1536 {
 		t.Errorf("expected 1.5GiB = 1536MB, got %v", containers[0].MemUsageMB)
+	}
+}
+
+func TestCollectContainersDistinguishesDecimalFromBinaryUnits(t *testing.T) {
+	runner := &fakeRunner{
+		runFunc: func(cmd string, args ...string) (string, error) {
+			// 1GB (decimal, 1_000_000_000 bytes) must NOT be treated as
+			// 1GiB (1_073_741_824 bytes) — it's ~953.67 MiB, not 1024.
+			return "decimal-app\t1.00%\t1GB / 4GB\t23.84%\n", nil
+		},
+	}
+
+	containers := CollectContainers(runner)
+
+	if len(containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(containers))
+	}
+
+	got := containers[0].MemUsageMB
+	want := 1_000_000_000.0 / (1024 * 1024)
+	if got < want-0.01 || got > want+0.01 {
+		t.Errorf("expected 1GB (decimal) ~= %.4f MiB, got %v", want, got)
+	}
+	if got == 1024 {
+		t.Error("1GB was incorrectly treated as 1GiB (1024 MB)")
+	}
+}
+
+func TestRunDockerStatsReturnsErrorOnTimeoutInsteadOfBlockingForever(t *testing.T) {
+	runner := &fakeRunner{
+		runFunc: func(cmd string, args ...string) (string, error) {
+			time.Sleep(200 * time.Millisecond)
+			return "should-not-be-seen\t1.00%\t10MiB / 100MiB\t10.00%\n", nil
+		},
+	}
+
+	start := time.Now()
+	_, err := runDockerStats(runner, 20*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("expected to return promptly after the timeout, took %s", elapsed)
 	}
 }
 
