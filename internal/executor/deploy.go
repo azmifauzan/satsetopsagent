@@ -119,6 +119,48 @@ func deployApp(payload map[string]any, runner exec.Runner) (string, error) {
 	// port binding needed — all traffic enters via nginx-certbot on 80/443.
 	args := []string{"run", "-d", "--name", name, "--network", "satsetops-proxy", "--restart", "unless-stopped"}
 
+	if raw, ok := payload["ram_mb"]; ok {
+		var ramMb int
+		switch v := raw.(type) {
+		case float64:
+			ramMb = int(v)
+		case int:
+			ramMb = v
+		case string:
+			parsed, err := strconv.Atoi(v)
+			if err != nil {
+				return "", fmt.Errorf("invalid 'ram_mb' in payload: %s", v)
+			}
+			ramMb = parsed
+		default:
+			return "", fmt.Errorf("invalid 'ram_mb' type in payload")
+		}
+		if ramMb > 0 {
+			args = append(args, "--memory", fmt.Sprintf("%dm", ramMb))
+		}
+	}
+
+	if raw, ok := payload["cpu_cores"]; ok {
+		var cpuCores float64
+		switch v := raw.(type) {
+		case float64:
+			cpuCores = v
+		case int:
+			cpuCores = float64(v)
+		case string:
+			parsed, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				return "", fmt.Errorf("invalid 'cpu_cores' in payload: %s", v)
+			}
+			cpuCores = parsed
+		default:
+			return "", fmt.Errorf("invalid 'cpu_cores' type in payload")
+		}
+		if cpuCores > 0 {
+			args = append(args, "--cpus", strconv.FormatFloat(cpuCores, 'f', -1, 64))
+		}
+	}
+
 	// Extract env variables
 	if envs, ok := payload["env"].(map[string]any); ok {
 		for k, v := range envs {

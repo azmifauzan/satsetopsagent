@@ -144,3 +144,51 @@ func TestContainerControl(t *testing.T) {
 		t.Errorf("missing docker stop command")
 	}
 }
+
+func TestDeployAppAppliesMemoryAndCPULimitsWhenProvided(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["docker pull test-image:latest"] = ""
+	runner.Outputs["docker rm -f test-app"] = ""
+	runner.Outputs["docker run -d --name test-app --network satsetops-proxy --restart unless-stopped --memory 512m --cpus 0.5 test-image:latest"] = "container_id"
+
+	payload := map[string]any{
+		"image":     "test-image:latest",
+		"name":      "test-app",
+		"port":      8080,
+		"ram_mb":    float64(512),
+		"cpu_cores": 0.5,
+	}
+
+	if _, err := deployApp(payload, runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !runner.HasCommand("docker run -d --name test-app --network satsetops-proxy --restart unless-stopped --memory 512m --cpus 0.5 test-image:latest") {
+		t.Errorf("missing docker run with resource limits, got: %v", runner.Commands)
+	}
+}
+
+func TestDeployAppOmitsResourceFlagsWhenNotProvided(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["docker pull test-image:latest"] = ""
+	runner.Outputs["docker rm -f test-app"] = ""
+	runner.Outputs["docker run -d --name test-app --network satsetops-proxy --restart unless-stopped test-image:latest"] = "container_id"
+
+	payload := map[string]any{
+		"image": "test-image:latest",
+		"name":  "test-app",
+		"port":  8080,
+	}
+
+	if _, err := deployApp(payload, runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if runner.HasCommandWithPrefix("docker run -d --name test-app --network satsetops-proxy --restart unless-stopped --memory") {
+		t.Errorf("did not expect a --memory flag, got: %v", runner.Commands)
+	}
+	if !runner.HasCommand("docker run -d --name test-app --network satsetops-proxy --restart unless-stopped test-image:latest") {
+		t.Errorf("expected unlimited docker run, got: %v", runner.Commands)
+	}
+}
+
