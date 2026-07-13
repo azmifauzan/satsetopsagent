@@ -145,8 +145,13 @@ func scanVPS(runner exec.Runner) (string, error) {
 	}
 
 	// A VPS's core/RAM count doesn't change post-provision, so this is
-	// reported once here rather than on every metrics tick. Best-effort:
-	// if gopsutil can't read it, report 0 rather than failing the whole scan.
+	// reported once here rather than on every metrics tick. Best-effort: if
+	// gopsutil can't read it, omit the field entirely (omitempty) rather
+	// than reporting a literal 0 — a real VPS never has 0 cores/0 MB RAM, so
+	// 0 here only ever means "couldn't read it". The web side's `?? $server
+	// ->total_cpu_cores` fallback only preserves the previous known-good
+	// value when the JSON key is absent; a reported 0 would overwrite it
+	// with a value that then poisons every capacity check on that server.
 	totalCPUCores, _ := cpu.Counts(true)
 	var totalRAMMB uint64
 	if vm, err := mem.VirtualMemory(); err == nil {
@@ -161,8 +166,8 @@ func scanVPS(runner exec.Runner) (string, error) {
 		Architecture  string   `json:"architecture"`
 		DistroFamily  string   `json:"distro_family"`
 		DistroWarning string   `json:"distro_warning"`
-		TotalCPUCores int      `json:"total_cpu_cores"`
-		TotalRAMMB    uint64   `json:"total_ram_mb"`
+		TotalCPUCores int      `json:"total_cpu_cores,omitempty"`
+		TotalRAMMB    uint64   `json:"total_ram_mb,omitempty"`
 	}{
 		Docker:        dockerSocketError == nil,
 		Clean:         clean,
