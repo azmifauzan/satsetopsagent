@@ -154,6 +154,22 @@ func (c *Client) PostSecurity(security SecurityEvent) error {
 	return nil
 }
 
+type SSLError struct {
+	Domain string `json:"domain"`
+	Error  string `json:"error"`
+	Time   string `json:"time"`
+}
+
+func (c *Client) PostSSLErrors(sslErrors []SSLError) error {
+	if len(sslErrors) == 0 {
+		return nil
+	}
+	if err := c.doJSON(http.MethodPost, "/api/agent/ssl-errors", map[string]any{"errors": sslErrors}, nil); err != nil {
+		return fmt.Errorf("post ssl errors: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) doJSON(method, path string, input, output any, extraHeaders ...map[string]string) error {
 	var body io.Reader
 	if input != nil {

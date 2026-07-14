@@ -71,6 +71,9 @@ func run() error {
 	go func() {
 		errorsChannel <- reportSecurity(ctx, client, cfg.SecurityInterval)
 	}()
+	go func() {
+		errorsChannel <- reportSSLErrors(ctx, client, 15*time.Minute)
+	}()
 
 	err = <-errorsChannel
 	cancel()
@@ -160,6 +163,34 @@ func reportSecurity(ctx context.Context, client *api.Client, interval time.Durat
 			return api.ErrUnauthorized
 		} else if err != nil {
 			log.Printf("security report failed: %v", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func reportSSLErrors(ctx context.Context, client *api.Client, interval time.Duration) error {
+	// If interval is too short, default to 15m to match the docker logs --since 15m
+	if interval < 15*time.Minute {
+		interval = 15 * time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		errorsList, err := reporter.CollectSSLErrors(&exec.RealRunner{})
+		if err != nil {
+			log.Printf("ssl errors collection failed: %v", err)
+		} else if len(errorsList) > 0 {
+			if err := client.PostSSLErrors(errorsList); errors.Is(err, api.ErrUnauthorized) {
+				return api.ErrUnauthorized
+			} else if err != nil {
+				log.Printf("ssl errors report failed: %v", err)
+			}
 		}
 
 		select {
