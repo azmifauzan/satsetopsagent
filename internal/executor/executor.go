@@ -48,6 +48,8 @@ func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (s
 		return restoreBackup(payload, runner)
 	case "self_update":
 		return selfUpdate(payload, runner)
+	case "delete_app":
+		return deleteApp(payload, runner)
 	default:
 		return "", fmt.Errorf("unsupported command type: %s", commandType)
 	}
