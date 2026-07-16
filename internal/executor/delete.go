@@ -39,6 +39,20 @@ func deleteApp(payload map[string]any, runner exec.Runner) (string, error) {
 	if _, err := runner.Run("rm", "-f", configFile); err != nil {
 		return "", fmt.Errorf("failed to remove vhost config for %s: %w", domain, err)
 	}
+
+	// Also drop the domain's Let's Encrypt state. Without this, certbot's
+	// renewal loop keeps trying (and, if it fails - e.g. rate-limited from
+	// repeated attach/detach churn - keeps failing) to renew a cert for a
+	// domain with no vhost left to serve it. jonasal/nginx-certbot's startup
+	// script isn't defensive against that: an unhandled renewal failure exits
+	// the whole entrypoint process, which is PID 1, so the entire proxy
+	// container crash-loops on every subsequent boot until this state is
+	// cleared. Best-effort: a domain that never got a cert issued has none
+	// of these paths, which is not an error.
+	_, _ = runner.Run("rm", "-f", fmt.Sprintf("/etc/letsencrypt/renewal/%s.conf", domain))
+	_, _ = runner.Run("rm", "-rf", fmt.Sprintf("/etc/letsencrypt/live/%s", domain))
+	_, _ = runner.Run("rm", "-rf", fmt.Sprintf("/etc/letsencrypt/archive/%s", domain))
+
 	if _, err := runner.Run("docker", "kill", "--signal=HUP", "nginx-certbot"); err != nil {
 		return "", fmt.Errorf("failed to reload nginx-certbot: %w", err)
 	}

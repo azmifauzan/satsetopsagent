@@ -42,6 +42,33 @@ func TestDeleteAppWithDomain(t *testing.T) {
 	if !runner.HasCommand("docker kill --signal=HUP nginx-certbot") {
 		t.Errorf("expected nginx-certbot reload")
 	}
+	if !runner.HasCommand("rm -f /etc/letsencrypt/renewal/example.com.conf") {
+		t.Errorf("expected letsencrypt renewal conf removal")
+	}
+	if !runner.HasCommand("rm -rf /etc/letsencrypt/live/example.com") {
+		t.Errorf("expected letsencrypt live dir removal")
+	}
+	if !runner.HasCommand("rm -rf /etc/letsencrypt/archive/example.com") {
+		t.Errorf("expected letsencrypt archive dir removal")
+	}
+}
+
+func TestDeleteAppLetsEncryptCleanupIsBestEffort(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["docker rm -f myapp"] = ""
+	runner.Outputs["rm -f /etc/nginx/user_conf.d/example.com.conf"] = ""
+	runner.Outputs["docker kill --signal=HUP nginx-certbot"] = ""
+	runner.Errors["rm -f /etc/letsencrypt/renewal/example.com.conf"] = errors.New("exit status 1: No such file or directory")
+	runner.Errors["rm -rf /etc/letsencrypt/live/example.com"] = errors.New("exit status 1: No such file or directory")
+	runner.Errors["rm -rf /etc/letsencrypt/archive/example.com"] = errors.New("exit status 1: No such file or directory")
+
+	res, err := deleteApp(map[string]any{"name": "myapp", "domain": "example.com"}, runner)
+	if err != nil {
+		t.Fatalf("letsencrypt cleanup failures must not fail the command: %v", err)
+	}
+	if res != "container myapp removed, vhost for example.com deleted" {
+		t.Errorf("unexpected result: %s", res)
+	}
 }
 
 func TestDeleteAppContainerAlreadyGone(t *testing.T) {
