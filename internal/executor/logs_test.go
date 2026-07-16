@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/satsetops/agent/internal/exec"
@@ -49,10 +50,10 @@ func TestCollectLogsUnknownSource(t *testing.T) {
 	}
 }
 
-func TestCollectLogsLetsencryptSucceedsFirstTry(t *testing.T) {
+func TestCollectLogsLetsencryptViaDockerCp(t *testing.T) {
 	runner := exec.NewFakeRunner()
-	runner.Outputs["docker start nginx-certbot"] = ""
-	runner.Outputs["docker exec nginx-certbot tail -n 100 /var/log/letsencrypt/letsencrypt.log"] = "urn:ietf:params:acme:error:rateLimited"
+	runner.Outputs["docker cp nginx-certbot:/var/log/letsencrypt/letsencrypt.log "] = ""
+	runner.Outputs["tail -n 100 -- /tmp/satsetops-letsencrypt-log-"] = "urn:ietf:params:acme:error:rateLimited"
 
 	logs, err := collectLogs(map[string]any{"source": "letsencrypt"}, runner)
 	if err != nil {
@@ -61,12 +62,24 @@ func TestCollectLogsLetsencryptSucceedsFirstTry(t *testing.T) {
 	if logs != "urn:ietf:params:acme:error:rateLimited" {
 		t.Errorf("unexpected output: %s", logs)
 	}
-	if !runner.HasCommand("docker start nginx-certbot") {
-		t.Errorf("expected the container to be started first")
+	if !runner.HasCommandWithPrefix("docker cp nginx-certbot:/var/log/letsencrypt/letsencrypt.log ") {
+		t.Errorf("expected a docker cp of the letsencrypt log")
+	}
+	if !runner.HasCommandWithPrefix("rm -f /tmp/satsetops-letsencrypt-log-") {
+		t.Errorf("expected the temp copy to be cleaned up")
 	}
 }
 
-func TestCollectLogsLetsencryptDefaultNameIsInvalidNeverHappens(t *testing.T) {
+func TestCollectLogsLetsencryptCpFailure(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Errors["docker cp nginx-certbot:/var/log/letsencrypt/letsencrypt.log "] = errors.New("exit status 1: Error: No such container:path")
+
+	if _, err := collectLogs(map[string]any{"source": "letsencrypt"}, runner); err == nil {
+		t.Fatal("expected error when docker cp fails")
+	}
+}
+
+func TestCollectLogsLetsencryptInvalidName(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	if _, err := collectLogs(map[string]any{"source": "letsencrypt", "name": "bad name!"}, runner); err == nil {
 		t.Fatal("expected error for invalid container name")

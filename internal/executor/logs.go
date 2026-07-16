@@ -59,10 +59,11 @@ func collectLogs(payload map[string]any, runner exec.Runner) (string, error) {
 	return out, nil
 }
 
-// collectLetsencryptLog starts the target container (if not already
-// running) and races to read certbot's own log via "docker exec" before the
-// container can crash again, retrying briefly since the read window after a
-// crash-looping container's start can be under a second.
+// collectLetsencryptLog reads certbot's own log out of the target
+// container's filesystem via "docker cp", which works regardless of the
+// container's run state (running, restarting, or exited) - unlike
+// "docker exec", it needs no live process, so it isn't a race against a
+// crash-looping container's next restart.
 func collectLetsencryptLog(payload map[string]any, tailStr string, runner exec.Runner) (string, error) {
 	name, ok := payload["name"].(string)
 	if !ok || name == "" {
@@ -72,19 +73,19 @@ func collectLetsencryptLog(payload map[string]any, tailStr string, runner exec.R
 		return "", fmt.Errorf("invalid container name format")
 	}
 
-	_, _ = runner.Run("docker", "start", name)
+	tmpPath := fmt.Sprintf("/tmp/satsetops-letsencrypt-log-%d", time.Now().UnixNano())
+	defer func() { _, _ = runner.Run("rm", "-f", tmpPath) }()
 
-	var lastErr error
-	for i := 0; i < 30; i++ {
-		out, err := runner.Run("docker", "exec", name, "tail", "-n", tailStr, letsencryptLogPath)
-		if err == nil {
-			return out, nil
-		}
-		lastErr = err
-		time.Sleep(200 * time.Millisecond)
+	if _, err := runner.Run("docker", "cp", name+":"+letsencryptLogPath, tmpPath); err != nil {
+		return "", fmt.Errorf("could not copy %s from %s: %w", letsencryptLogPath, name, err)
 	}
 
-	return "", fmt.Errorf("could not read %s from %s before it stopped: %w", letsencryptLogPath, name, lastErr)
+	out, err := runner.Run("tail", "-n", tailStr, "--", tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read copied letsencrypt log: %w", err)
+	}
+
+	return out, nil
 }
 
 func tailFromPayload(payload map[string]any) string {
