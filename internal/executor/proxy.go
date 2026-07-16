@@ -167,10 +167,19 @@ func writeProxyHardeningConfig(runner exec.Runner) error {
 		return fmt.Errorf("create nginx log dir: %w", err)
 	}
 
+	// keepalive_timeout is deliberately NOT set here: the base nginx image's
+	// own nginx.conf already declares it at the same (http) level, and this
+	// file is included into that same block via conf.d/*.conf - nginx treats
+	// a second keepalive_timeout in the same context as a hard config error
+	// ("directive is duplicate"), refusing to start at all. That took down
+	// nginx-certbot in production (crash-looped indefinitely, since a
+	// container that never passes its own config test can't ever recover on
+	// its own) the first time this container was ever recreated from
+	// scratch after this file was introduced - it had been running
+	// continuously since Phase 3 and never hit a cold start until then.
 	config := `server_tokens off;
 client_body_timeout 10s;
 client_header_timeout 10s;
-keepalive_timeout 15s;
 send_timeout 10s;
 client_max_body_size 32m;
 
