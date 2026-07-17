@@ -12,6 +12,7 @@ func TestInstallCrowdsec(t *testing.T) {
 	runner.Outputs[osReleaseCmd] = "ubuntu|"
 	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
+	runner.Outputs["cscli hub update"] = ""
 	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
 	runner.Outputs["cscli collections install crowdsecurity/http-cve --force"] = ""
 	runner.Outputs["mkdir -p /etc/systemd/system/crowdsec.service.d"] = ""
@@ -25,11 +26,43 @@ func TestInstallCrowdsec(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	if !runner.HasCommand("cscli hub update") {
+		t.Errorf("expected hub index to be refreshed before installing collections")
+	}
 	if !runner.HasCommand("bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables") {
 		t.Errorf("expected bouncer install command")
 	}
 	if !runner.HasCommand("cscli collections install crowdsecurity/sshd --force") {
 		t.Errorf("expected collection install command")
+	}
+
+	hubUpdateIdx, collectionsIdx := -1, -1
+	for i, cmd := range runner.Commands {
+		if cmd == "cscli hub update" {
+			hubUpdateIdx = i
+		}
+		if cmd == "cscli collections install crowdsecurity/sshd --force" && collectionsIdx == -1 {
+			collectionsIdx = i
+		}
+	}
+	if hubUpdateIdx == -1 || collectionsIdx == -1 || hubUpdateIdx > collectionsIdx {
+		t.Fatalf("expected cscli hub update to run before collections install, got order: %v", runner.Commands)
+	}
+}
+
+func TestInstallCrowdsecFailsWhenHubUpdateFails(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "ubuntu|"
+	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
+	runner.Errors["cscli hub update"] = errNotFound()
+
+	_, err := installCrowdsec(nil, runner)
+	if err == nil {
+		t.Fatal("expected an error when the hub index can't be refreshed")
+	}
+	if runner.HasCommandWithPrefix("cscli collections install") {
+		t.Errorf("did not expect any collection install attempt after a failed hub update, got: %v", runner.Commands)
 	}
 }
 

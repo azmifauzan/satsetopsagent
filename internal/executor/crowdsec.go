@@ -54,6 +54,19 @@ func installCrowdsec(payload map[string]any, runner exec.Runner) (string, error)
 		return "", fmt.Errorf("failed to install crowdsec engine: %w", err)
 	}
 
+	// Refresh cscli's local hub index before installing anything from it —
+	// a fresh engine install's cached index can already be stale/mismatched
+	// against what the hub actually serves, which fails every subsequent
+	// `cscli collections install` with "Downloaded version doesn't match
+	// index, please 'hub update'" (hit in production on two separate VPS,
+	// after the --force fix below was already in place — a distinct bug).
+	_, err = withRetry(3, 5*time.Second, func() (string, error) {
+		return runner.Run("cscli", "hub", "update")
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to update crowdsec hub index: %w", err)
+	}
+
 	// Install limited collections. --force is required, not optional — a
 	// production VPS hit "crowdsecurity/sshd is tainted, won't enable
 	// unless --force" when the collection's underlying scenarios were
