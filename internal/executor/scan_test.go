@@ -342,4 +342,34 @@ func TestScanVPSReportsTotalCPUAndRAM(t *testing.T) {
 	if !ok || totalRAM < 1 {
 		t.Fatalf("expected total_ram_mb to be a positive number, got: %v", report["total_ram_mb"])
 	}
+
+	totalDisk, ok := report["total_disk_gb"].(float64)
+	if !ok || totalDisk < 1 {
+		t.Fatalf("expected total_disk_gb to be a positive number, got: %v", report["total_disk_gb"])
+	}
+}
+
+func TestScanVPSReportsOSName(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs["ss -tuln"] = "tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:*\n"
+	runner.Outputs["systemctl list-units --type=service --state=running"] = "  ssh.service loaded active running OpenBSD Secure Shell server\n"
+	runner.Outputs[osReleaseCmd] = "ubuntu|"
+	runner.Outputs[`sh -c . /etc/os-release && printf '%s' "$PRETTY_NAME"`] = "Ubuntu 22.04.4 LTS"
+
+	output, err := Dispatch("scan_vps", nil, runner)
+	if err != nil {
+		t.Fatalf("scan_vps: %v", err)
+	}
+
+	var report map[string]any
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("invalid report JSON: %v", err)
+	}
+
+	if report["os_name"] != "Ubuntu 22.04.4 LTS" {
+		t.Fatalf("expected os_name to be the PRETTY_NAME, got: %v", report["os_name"])
+	}
+	if report["distro_family"] != "debian" {
+		t.Fatalf("expected distro_family to stay the coarse tooling family (debian), got: %v", report["distro_family"])
+	}
 }

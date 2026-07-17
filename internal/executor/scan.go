@@ -10,6 +10,7 @@ import (
 	"github.com/satsetops/agent/internal/distro"
 	"github.com/satsetops/agent/internal/exec"
 	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
@@ -144,18 +145,31 @@ func scanVPS(runner exec.Runner) (string, error) {
 		distroWarning = "Distro tidak dikenali — SatsetOps mendukung Debian/Ubuntu, RHEL-family (CentOS/Rocky/AlmaLinux/Fedora), dan Arch/Manjaro. Beberapa langkah hardening mungkin gagal atau perlu ditangani manual."
 	}
 
-	// A VPS's core/RAM count doesn't change post-provision, so this is
+	// distro_family (above) is a coarse tooling grouping (Ubuntu and
+	// Debian both report "debian", since every executor only cares which
+	// package manager to use) — os_name is the literal human-readable
+	// name (e.g. "Ubuntu 22.04.4 LTS") for display purposes only, never
+	// used for branching logic anywhere.
+	osName, _ := runner.Run("sh", "-c", `. /etc/os-release && printf '%s' "$PRETTY_NAME"`)
+	osName = strings.TrimSpace(osName)
+
+	// A VPS's core/RAM/disk count doesn't change post-provision, so this is
 	// reported once here rather than on every metrics tick. Best-effort: if
 	// gopsutil can't read it, omit the field entirely (omitempty) rather
-	// than reporting a literal 0 — a real VPS never has 0 cores/0 MB RAM, so
-	// 0 here only ever means "couldn't read it". The web side's `?? $server
-	// ->total_cpu_cores` fallback only preserves the previous known-good
-	// value when the JSON key is absent; a reported 0 would overwrite it
-	// with a value that then poisons every capacity check on that server.
+	// than reporting a literal 0 — a real VPS never has 0 cores/0 MB RAM/0GB
+	// disk, so 0 here only ever means "couldn't read it". The web side's
+	// `?? $server->total_cpu_cores` fallback only preserves the previous
+	// known-good value when the JSON key is absent; a reported 0 would
+	// overwrite it with a value that then poisons every capacity check on
+	// that server.
 	totalCPUCores, _ := cpu.Counts(true)
 	var totalRAMMB uint64
 	if vm, err := mem.VirtualMemory(); err == nil {
 		totalRAMMB = vm.Total / 1024 / 1024
+	}
+	var totalDiskGB uint64
+	if du, err := disk.Usage("/"); err == nil {
+		totalDiskGB = du.Total / 1024 / 1024 / 1024
 	}
 
 	report := struct {
@@ -166,8 +180,10 @@ func scanVPS(runner exec.Runner) (string, error) {
 		Architecture  string   `json:"architecture"`
 		DistroFamily  string   `json:"distro_family"`
 		DistroWarning string   `json:"distro_warning"`
+		OSName        string   `json:"os_name,omitempty"`
 		TotalCPUCores int      `json:"total_cpu_cores,omitempty"`
 		TotalRAMMB    uint64   `json:"total_ram_mb,omitempty"`
+		TotalDiskGB   uint64   `json:"total_disk_gb,omitempty"`
 	}{
 		Docker:        dockerSocketError == nil,
 		Clean:         clean,
@@ -176,8 +192,10 @@ func scanVPS(runner exec.Runner) (string, error) {
 		Architecture:  runtime.GOARCH,
 		DistroFamily:  string(family),
 		DistroWarning: distroWarning,
+		OSName:        osName,
 		TotalCPUCores: totalCPUCores,
 		TotalRAMMB:    totalRAMMB,
+		TotalDiskGB:   totalDiskGB,
 	}
 
 	encoded, err := json.Marshal(report)
