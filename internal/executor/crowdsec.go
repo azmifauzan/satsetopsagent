@@ -46,6 +46,22 @@ func installCrowdsec(payload map[string]any, runner exec.Runner) (string, error)
 		return "", fmt.Errorf("failed to add crowdsec repo: %w", err)
 	}
 
+	// packagecloud's install script doesn't reliably refresh the local
+	// package index on its own — CrowdSec's own install docs list this as
+	// its own explicit step, and skipping it produced a real production
+	// failure: the engine install (using an already-warm cache) succeeded,
+	// but the bouncer install right after failed with "Unable to locate
+	// package crowdsec-firewall-bouncer-iptables" — the exact symptom of a
+	// stale apt index that never picked up the newly-added repo's listing.
+	if family != distro.RHEL {
+		_, err = withRetry(3, 10*time.Second, func() (string, error) {
+			return runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get update")
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to refresh apt index after adding crowdsec repo: %w", err)
+		}
+	}
+
 	// Install engine.
 	_, err = withRetry(3, 10*time.Second, func() (string, error) {
 		return runner.Run("bash", "-c", installCmd)

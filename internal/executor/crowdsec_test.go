@@ -11,6 +11,7 @@ func TestInstallCrowdsec(t *testing.T) {
 	runner := exec.NewFakeRunner()
 	runner.Outputs[osReleaseCmd] = "ubuntu|"
 	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get update"] = ""
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
 	runner.Outputs["cscli hub update"] = ""
 	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
@@ -26,6 +27,9 @@ func TestInstallCrowdsec(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	if !runner.HasCommand("bash -c DEBIAN_FRONTEND=noninteractive apt-get update") {
+		t.Errorf("expected apt index to be refreshed after adding the crowdsec repo")
+	}
 	if !runner.HasCommand("cscli hub update") {
 		t.Errorf("expected hub index to be refreshed before installing collections")
 	}
@@ -138,6 +142,58 @@ func TestInstallCrowdsecOnRHELUsesRpmRepo(t *testing.T) {
 	}
 	if !runner.HasCommand("bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.rpm.sh | bash") {
 		t.Errorf("expected the rpm install script, got: %v", runner.Commands)
+	}
+	if runner.HasCommandWithPrefix("bash -c DEBIAN_FRONTEND=noninteractive apt-get update") {
+		t.Errorf("did not expect an apt-get update on RHEL, got: %v", runner.Commands)
+	}
+}
+
+func TestInstallCrowdsecRefreshesAptIndexBeforeInstalling(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "ubuntu|"
+	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get update"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
+	runner.Outputs["cscli hub update"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/nginx --force"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/http-cve --force"] = ""
+	runner.Outputs["mkdir -p /etc/systemd/system/crowdsec.service.d"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables"] = ""
+	runner.Outputs["systemctl daemon-reload"] = ""
+	runner.Outputs["systemctl restart crowdsec"] = ""
+
+	_, err := installCrowdsec(nil, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updateIdx, installIdx := -1, -1
+	for i, cmd := range runner.Commands {
+		if cmd == "bash -c DEBIAN_FRONTEND=noninteractive apt-get update" {
+			updateIdx = i
+		}
+		if cmd == "bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec" {
+			installIdx = i
+		}
+	}
+	if updateIdx == -1 || installIdx == -1 || updateIdx > installIdx {
+		t.Fatalf("expected apt-get update to run before installing crowdsec, got order: %v", runner.Commands)
+	}
+}
+
+func TestInstallCrowdsecFailsWhenAptUpdateFails(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "ubuntu|"
+	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
+	runner.Errors["bash -c DEBIAN_FRONTEND=noninteractive apt-get update"] = errNotFound()
+
+	_, err := installCrowdsec(nil, runner)
+	if err == nil {
+		t.Fatal("expected an error when the apt index can't be refreshed")
+	}
+	if runner.HasCommandWithPrefix("bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec") {
+		t.Errorf("did not expect crowdsec install attempt after a failed apt-get update, got: %v", runner.Commands)
 	}
 }
 
