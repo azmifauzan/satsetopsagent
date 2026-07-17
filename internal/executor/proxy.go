@@ -12,8 +12,24 @@ import (
 var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}$`)
 var containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
-const proxyNetwork = "satsetops-proxy"
-const nginxLogDir = "/var/log/satsetops/nginx"
+const (
+	proxyNetwork          = "satsetops-proxy"
+	nginxLogDir           = "/var/log/satsetops/nginx"
+	proxyRedirectorPath   = "/etc/nginx/satsetops-redirector.conf"
+	proxyRedirectorConfig = `server {
+    listen 80 default_server reuseport;
+
+    location '/.well-known/acme-challenge' {
+        default_type "text/plain";
+        root /var/www/letsencrypt;
+    }
+
+    location / {
+        return 301 https://$http_host$request_uri;
+    }
+}
+`
+)
 
 // setupNginxProxy deploys and hardens the jonasal/nginx-certbot reverse proxy
 // container on the satsetops-proxy Docker network. Called once during hardening
@@ -31,14 +47,17 @@ func setupNginxProxy(payload map[string]any, runner exec.Runner) (string, error)
 	if err := writeProxyHardeningConfig(runner); err != nil {
 		return "", err
 	}
-	needsReload, err := ensureNginxCertbotRunning(email, runner)
-	if err != nil {
+	if err := writeProxyRedirectorConfig(runner); err != nil {
 		return "", err
 	}
-	if needsReload {
-		if _, err := runner.Run("docker", "kill", "--signal=HUP", "nginx-certbot"); err != nil {
-			return "", fmt.Errorf("reload nginx-certbot after hardening: %w", err)
-		}
+	if err := ensureNginxCertbotRunning(email, runner); err != nil {
+		return "", err
+	}
+	if _, err := runner.Run("docker", "cp", proxyRedirectorPath, "nginx-certbot:/etc/nginx/conf.d/redirector.conf"); err != nil {
+		return "", fmt.Errorf("disable nginx-certbot IPv6 listener: %w", err)
+	}
+	if _, err := runner.Run("docker", "restart", "nginx-certbot"); err != nil {
+		return "", fmt.Errorf("restart nginx-certbot after hardening: %w", err)
 	}
 	if err := configureCrowdsecNginxLogs(runner); err != nil {
 		return "", err
@@ -112,26 +131,26 @@ func ensureProxyNetwork(runner exec.Runner) error {
 
 // ensureNginxCertbotRunning starts the container if not already running.
 // Idempotent — safe to call on re-hardening.
-func ensureNginxCertbotRunning(email string, runner exec.Runner) (bool, error) {
+func ensureNginxCertbotRunning(email string, runner exec.Runner) error {
 	if _, err := runner.Run("mkdir", "-p", "/etc/nginx/user_conf.d"); err != nil {
-		return false, fmt.Errorf("create nginx user_conf.d: %w", err)
+		return fmt.Errorf("create nginx user_conf.d: %w", err)
 	}
 	if _, err := runner.Run("mkdir", "-p", "/etc/letsencrypt"); err != nil {
-		return false, fmt.Errorf("create letsencrypt dir: %w", err)
+		return fmt.Errorf("create letsencrypt dir: %w", err)
 	}
 	if _, err := runner.Run("mkdir", "-p", nginxLogDir); err != nil {
-		return false, fmt.Errorf("create nginx log dir: %w", err)
+		return fmt.Errorf("create nginx log dir: %w", err)
 	}
 
 	running, _ := runner.Run("docker", "inspect", "-f", "{{.State.Running}}", "nginx-certbot")
 	switch strings.TrimSpace(running) {
 	case "true":
-		return true, nil
+		return nil
 	case "false":
 		if _, err := runner.Run("docker", "start", "nginx-certbot"); err != nil {
-			return false, fmt.Errorf("start nginx-certbot: %w", err)
+			return fmt.Errorf("start nginx-certbot: %w", err)
 		}
-		return true, nil
+		return nil
 	}
 
 	// Container does not exist — deploy it.
@@ -154,9 +173,17 @@ func ensureNginxCertbotRunning(email string, runner exec.Runner) (bool, error) {
 		"jonasal/nginx-certbot:latest",
 	)
 	if err != nil {
-		return false, fmt.Errorf("deploy nginx-certbot: %w", err)
+		return fmt.Errorf("deploy nginx-certbot: %w", err)
 	}
-	return false, nil
+	return nil
+}
+
+// jonasal/nginx-certbot's built-in redirector listens on both IPv4 and IPv6.
+// Some VPS kernels disable IPv6 entirely, making that listener a fatal nginx
+// config error. Keep the ACME redirector behavior, but listen on IPv4 only.
+func writeProxyRedirectorConfig(runner exec.Runner) error {
+	_, err := runner.RunWithStdin("bash", proxyRedirectorConfig, "-c", "cat > "+proxyRedirectorPath)
+	return err
 }
 
 func writeProxyHardeningConfig(runner exec.Runner) error {

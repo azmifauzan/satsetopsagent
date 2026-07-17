@@ -1,12 +1,17 @@
 package executor
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/satsetops/agent/internal/exec"
 )
 
 func TestSetupNginxProxy(t *testing.T) {
+	if strings.Contains(proxyRedirectorConfig, "[::]") {
+		t.Fatal("redirector config must not require IPv6")
+	}
+
 	runner := exec.NewFakeRunner()
 	runner.Outputs["mkdir -p /etc/nginx/user_conf.d"] = ""
 	runner.Outputs["mkdir -p /etc/letsencrypt"] = ""
@@ -20,6 +25,8 @@ func TestSetupNginxProxy(t *testing.T) {
 	// Container doesn't exist yet:
 	runner.Outputs["docker inspect -f {{.State.Running}} nginx-certbot"] = ""
 	runner.Outputs["docker run"] = ""
+	runner.Outputs["docker cp "+proxyRedirectorPath+" nginx-certbot:/etc/nginx/conf.d/redirector.conf"] = ""
+	runner.Outputs["docker restart nginx-certbot"] = "nginx-certbot"
 
 	payload := map[string]any{"email": "user@example.com"}
 
@@ -36,6 +43,12 @@ func TestSetupNginxProxy(t *testing.T) {
 	if !runner.HasCommandWithPrefix("docker run") {
 		t.Errorf("expected docker run to deploy nginx-certbot")
 	}
+	if !runner.HasCommand("docker cp " + proxyRedirectorPath + " nginx-certbot:/etc/nginx/conf.d/redirector.conf") {
+		t.Errorf("expected IPv4-only redirector config to be installed")
+	}
+	if !runner.HasCommand("docker restart nginx-certbot") {
+		t.Errorf("expected nginx-certbot restart after config replacement")
+	}
 	if !runner.HasCommand("systemctl reload-or-restart crowdsec") {
 		t.Errorf("expected crowdsec reload")
 	}
@@ -48,7 +61,8 @@ func TestSetupNginxProxyIdempotent(t *testing.T) {
 	runner.Outputs["mkdir -p /var/log/satsetops/nginx"] = ""
 	runner.Outputs["mkdir -p /etc/crowdsec/acquis.d"] = ""
 	runner.Outputs["bash -c"] = ""
-	runner.Outputs["docker kill --signal=HUP nginx-certbot"] = ""
+	runner.Outputs["docker cp "+proxyRedirectorPath+" nginx-certbot:/etc/nginx/conf.d/redirector.conf"] = ""
+	runner.Outputs["docker restart nginx-certbot"] = "nginx-certbot"
 	runner.Outputs["systemctl reload-or-restart crowdsec"] = ""
 	// Network already exists:
 	runner.Outputs["docker network inspect satsetops-proxy"] = `[{"Name":"satsetops-proxy"}]`
