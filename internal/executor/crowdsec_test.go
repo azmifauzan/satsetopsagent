@@ -12,8 +12,8 @@ func TestInstallCrowdsec(t *testing.T) {
 	runner.Outputs[osReleaseCmd] = "ubuntu|"
 	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
-	runner.Outputs["cscli collections install crowdsecurity/sshd"] = ""
-	runner.Outputs["cscli collections install crowdsecurity/http-cve"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/http-cve --force"] = ""
 	runner.Outputs["mkdir -p /etc/systemd/system/crowdsec.service.d"] = ""
 	runner.Outputs["bash -c echo -e '[Service]\\nMemoryHigh=150M\\nMemoryMax=250M\\nCPUQuota=20%\\n' > /etc/systemd/system/crowdsec.service.d/limits.conf"] = ""
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables"] = ""
@@ -28,7 +28,7 @@ func TestInstallCrowdsec(t *testing.T) {
 	if !runner.HasCommand("bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables") {
 		t.Errorf("expected bouncer install command")
 	}
-	if !runner.HasCommand("cscli collections install crowdsecurity/sshd") {
+	if !runner.HasCommand("cscli collections install crowdsecurity/sshd --force") {
 		t.Errorf("expected collection install command")
 	}
 }
@@ -38,7 +38,7 @@ func TestInstallCrowdsecWhitelistsPlatformIPs(t *testing.T) {
 	runner.Outputs[osReleaseCmd] = "ubuntu|"
 	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
-	runner.Outputs["cscli collections install crowdsecurity/sshd"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
 	runner.Outputs["mkdir -p /etc/systemd/system/crowdsec.service.d"] = ""
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables"] = ""
 	runner.Outputs["systemctl daemon-reload"] = ""
@@ -69,7 +69,7 @@ func TestInstallCrowdsecSkipsWhitelistWhenPayloadEmpty(t *testing.T) {
 	runner.Outputs[osReleaseCmd] = "ubuntu|"
 	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
-	runner.Outputs["cscli collections install crowdsecurity/sshd"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
 	runner.Outputs["mkdir -p /etc/systemd/system/crowdsec.service.d"] = ""
 	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables"] = ""
 	runner.Outputs["systemctl daemon-reload"] = ""
@@ -90,7 +90,7 @@ func TestInstallCrowdsecOnRHELUsesRpmRepo(t *testing.T) {
 	runner.Outputs[osReleaseCmd] = "rocky|"
 	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.rpm.sh | bash"] = ""
 	runner.Outputs["bash -c dnf install -y crowdsec"] = ""
-	runner.Outputs["cscli collections install crowdsecurity/sshd"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
 	runner.Outputs["mkdir -p /etc/systemd/system/crowdsec.service.d"] = ""
 	runner.Outputs["bash -c dnf install -y crowdsec-firewall-bouncer-iptables"] = ""
 	runner.Outputs["systemctl daemon-reload"] = ""
@@ -121,5 +121,47 @@ func TestInstallCrowdsecSkipsOnArch(t *testing.T) {
 	}
 	if len(runner.Commands) != 1 { // only the os-release read
 		t.Fatalf("expected Arch to touch nothing else, got: %v", runner.Commands)
+	}
+}
+
+func TestInstallCrowdsecPassesForceToCollectionsInstall(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "ubuntu|"
+	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/nginx --force"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/http-cve --force"] = ""
+	runner.Outputs["mkdir -p /etc/systemd/system/crowdsec.service.d"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables"] = ""
+	runner.Outputs["systemctl daemon-reload"] = ""
+	runner.Outputs["systemctl restart crowdsec"] = ""
+
+	_, err := installCrowdsec(nil, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !runner.HasCommand("cscli collections install crowdsecurity/sshd --force") {
+		t.Errorf("expected --force on the collections install call, got: %v", runner.Commands)
+	}
+}
+
+func TestInstallCrowdsecRetriesTransientCollectionFailureThenSucceeds(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "ubuntu|"
+	runner.Outputs["bash -c curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"] = ""
+	runner.FailTimes["cscli collections install crowdsecurity/sshd --force"] = 2
+	runner.Outputs["cscli collections install crowdsecurity/sshd --force"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/nginx --force"] = ""
+	runner.Outputs["cscli collections install crowdsecurity/http-cve --force"] = ""
+	runner.Outputs["mkdir -p /etc/systemd/system/crowdsec.service.d"] = ""
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer-iptables"] = ""
+	runner.Outputs["systemctl daemon-reload"] = ""
+	runner.Outputs["systemctl restart crowdsec"] = ""
+
+	_, err := installCrowdsec(nil, runner)
+	if err != nil {
+		t.Fatalf("expected the 3rd attempt to succeed, got error: %v", err)
 	}
 }

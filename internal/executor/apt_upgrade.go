@@ -3,6 +3,7 @@ package executor
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/satsetops/agent/internal/distro"
 	"github.com/satsetops/agent/internal/exec"
@@ -28,20 +29,28 @@ func aptUpgrade(payload map[string]any, runner exec.Runner) (string, error) {
 		if !distro.CommandExists(runner, "dnf") {
 			manager = "yum"
 		}
-		if _, err := runner.Run("bash", "-c", manager+" upgrade -y"); err != nil {
+		if _, err := withRetry(3, 10*time.Second, func() (string, error) {
+			return runner.Run("bash", "-c", manager+" upgrade -y")
+		}); err != nil {
 			return "", fmt.Errorf("failed to %s upgrade: %w", manager, err)
 		}
 	case distro.Arch:
-		if _, err := runner.Run("bash", "-c", "pacman -Syu --noconfirm"); err != nil {
+		if _, err := withRetry(3, 10*time.Second, func() (string, error) {
+			return runner.Run("bash", "-c", "pacman -Syu --noconfirm")
+		}); err != nil {
 			return "", fmt.Errorf("failed to pacman -Syu: %w", err)
 		}
 	default: // Debian and Unknown both fall back to apt — apt is the
 		// majority case and the safest generic default when detection
 		// itself is inconclusive.
-		if _, err := runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get update"); err != nil {
+		if _, err := withRetry(3, 10*time.Second, func() (string, error) {
+			return runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get update")
+		}); err != nil {
 			return "", fmt.Errorf("failed to apt-get update: %w", err)
 		}
-		if _, err := runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y"); err != nil {
+		if _, err := withRetry(3, 10*time.Second, func() (string, error) {
+			return runner.Run("bash", "-c", "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y")
+		}); err != nil {
 			return "", fmt.Errorf("failed to apt-get upgrade: %w", err)
 		}
 	}

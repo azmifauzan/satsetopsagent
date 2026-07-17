@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/satsetops/agent/internal/distro"
 	"github.com/satsetops/agent/internal/exec"
@@ -38,21 +39,32 @@ func installCrowdsec(payload map[string]any, runner exec.Runner) (string, error)
 	}
 
 	// Add repo
-	_, err = runner.Run("bash", "-c", "curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/"+repoScript+" | bash")
+	_, err = withRetry(3, 5*time.Second, func() (string, error) {
+		return runner.Run("bash", "-c", "curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/"+repoScript+" | bash")
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to add crowdsec repo: %w", err)
 	}
 
 	// Install engine.
-	_, err = runner.Run("bash", "-c", installCmd)
+	_, err = withRetry(3, 10*time.Second, func() (string, error) {
+		return runner.Run("bash", "-c", installCmd)
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to install crowdsec engine: %w", err)
 	}
 
-	// Install limited collections
+	// Install limited collections. --force is required, not optional — a
+	// production VPS hit "crowdsecurity/sshd is tainted, won't enable
+	// unless --force" when the collection's underlying scenarios were
+	// already present locally (base image or an earlier interrupted
+	// attempt) and modified from upstream. --force is safe/idempotent
+	// whether the item is absent, already correctly installed, or tainted.
 	collections := []string{"crowdsecurity/sshd", "crowdsecurity/nginx", "crowdsecurity/http-cve"}
 	for _, coll := range collections {
-		_, err = runner.Run("cscli", "collections", "install", coll)
+		_, err = withRetry(3, 5*time.Second, func() (string, error) {
+			return runner.Run("cscli", "collections", "install", coll, "--force")
+		})
 		if err != nil && !strings.Contains(err.Error(), "already installed") {
 			return "", fmt.Errorf("failed to install collection %s: %w", coll, err)
 		}
@@ -76,7 +88,9 @@ CPUQuota=20%
 	}
 
 	// Install bouncer
-	_, err = runner.Run("bash", "-c", bouncerCmd)
+	_, err = withRetry(3, 10*time.Second, func() (string, error) {
+		return runner.Run("bash", "-c", bouncerCmd)
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to install crowdsec bouncer: %w", err)
 	}

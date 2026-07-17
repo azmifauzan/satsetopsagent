@@ -131,3 +131,17 @@ func TestAptUpgradeUsesPacmanOnArch(t *testing.T) {
 		t.Errorf("expected pacman upgrade command, got: %v", runner.Commands)
 	}
 }
+
+func TestAptUpgradeRetriesTransientLockFailureThenSucceeds(t *testing.T) {
+	runner := exec.NewFakeRunner()
+	runner.Outputs[osReleaseCmd] = "ubuntu|"
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get update"] = ""
+	runner.FailTimes["bash -c DEBIAN_FRONTEND=noninteractive apt-get upgrade -y"] = 2
+	runner.Outputs["bash -c DEBIAN_FRONTEND=noninteractive apt-get upgrade -y"] = ""
+	runner.Errors["test -f /var/run/reboot-required"] = errors.New("not required")
+
+	_, err := aptUpgrade(nil, runner)
+	if err != nil {
+		t.Fatalf("expected the 3rd attempt to succeed, got error: %v", err)
+	}
+}

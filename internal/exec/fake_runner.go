@@ -1,21 +1,24 @@
 package exec
 
 import (
+	"errors"
 	"strings"
 )
 
 // FakeRunner implements Runner for testing
 type FakeRunner struct {
-	Commands []string
-	Outputs  map[string]string
-	Errors   map[string]error
+	Commands  []string
+	Outputs   map[string]string
+	Errors    map[string]error
+	FailTimes map[string]int // command -> remaining forced-failure count; decrements on each call, falls through once it hits 0
 }
 
 func NewFakeRunner() *FakeRunner {
 	return &FakeRunner{
-		Commands: make([]string, 0),
-		Outputs:  make(map[string]string),
-		Errors:   make(map[string]error),
+		Commands:  make([]string, 0),
+		Outputs:   make(map[string]string),
+		Errors:    make(map[string]error),
+		FailTimes: make(map[string]int),
 	}
 }
 
@@ -33,6 +36,11 @@ func (f *FakeRunner) run(name string, args ...string) (string, error) {
 		cmdStr += " " + strings.Join(args, " ")
 	}
 	f.Commands = append(f.Commands, cmdStr)
+
+	if n, ok := f.FailTimes[cmdStr]; ok && n > 0 {
+		f.FailTimes[cmdStr] = n - 1
+		return "", errors.New("simulated transient failure")
+	}
 
 	if err, ok := f.Errors[cmdStr]; ok && err != nil {
 		return "", err

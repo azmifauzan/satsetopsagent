@@ -14,6 +14,8 @@ func Dispatch(commandType string, payload map[string]any, runner exec.Runner) (s
 		return scanVPS(runner)
 	case "apt_upgrade":
 		return aptUpgrade(payload, runner)
+	case "install_docker":
+		return installDocker(runner)
 	case "harden_firewall":
 		return hardenFirewall(payload, runner)
 	case "ssh_harden":

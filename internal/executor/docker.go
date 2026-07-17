@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/satsetops/agent/internal/exec"
 )
@@ -25,7 +26,9 @@ func dockerHarden(payload map[string]any, runner exec.Runner) (string, error) {
 	}
 
 	// Restart docker
-	_, err = runner.Run("systemctl", "restart", "docker")
+	_, err = withRetry(3, 3*time.Second, func() (string, error) {
+		return runner.Run("systemctl", "restart", "docker")
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to restart docker: %w", err)
 	}
